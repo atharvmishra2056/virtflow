@@ -1,0 +1,9 @@
+/home/atharv/virtflow/src/main.py:81: DeprecationWarning: Enum value 'Qt::ApplicationAttribute.AA_EnableHighDpiScaling' is marked as deprecated, please check the documentation for more information.
+  QApplication.setAttribute(Qt.AA_EnableHighDpiScaling, True)
+/home/atharv/virtflow/src/main.py:82: DeprecationWarning: Enum value 'Qt::ApplicationAttribute.AA_UseHighDpiPixmaps' is marked as deprecated, please check the documentation for more information.
+  QApplication.setAttribute(Qt.AA_UseHighDpiPixmaps, True)
+INFO: Starting VirtFlow v0.1.0
+INFO: Connecting to libvirt at qemu:///system
+INFO: Connected to hypervisor: QEMU
+INFO: Hypervisor version: 10001000
+INFO: Found virt-viewer
