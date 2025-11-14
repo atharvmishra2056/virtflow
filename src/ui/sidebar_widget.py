@@ -5,10 +5,10 @@ for managing the VM list.
 """
 from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QLabel, QListWidget, QPushButton, QListWidgetItem,
-    QMessageBox
+    QMessageBox, QMenu
 )
-from PySide6.QtCore import Qt, QSize, Signal, QTimer
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import Qt, QSize, Signal, QTimer, Slot
+from PySide6.QtGui import QIcon, QAction, QCursor
 
 # Import our new custom item widget
 from ui.widgets.vm_list_item_widget import VMListItemWidget
@@ -50,6 +50,11 @@ class SidebarWidget(QFrame):
         self.vm_list = QListWidget()
         self.vm_list.setObjectName("VMList")
         self.vm_list.itemSelectionChanged.connect(self._on_selection_changed)
+        
+        # --- NEW: Add Context Menu ---
+        self.vm_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.vm_list.customContextMenuRequested.connect(self.show_vm_context_menu)
+        # --- END NEW ---
 
         self.new_vm_btn = QPushButton(" Create New VM")
         self.new_vm_btn.setObjectName("NewVMButton")
@@ -333,3 +338,70 @@ class SidebarWidget(QFrame):
                 item.setHidden(not matches)
             else:
                 item.setHidden(True)
+    
+    # --- NEW: Context Menu ---
+    @Slot()
+    def show_vm_context_menu(self, pos):
+        item = self.vm_list.itemAt(pos)
+        if not item:
+            return
+
+        domain = self._get_selected_domain()
+        if not domain:
+            return
+            
+        vm = self.vm_data[domain.UUIDString()]
+
+        menu = QMenu(self)
+        
+        # --- Display Preference ---
+        display_menu = menu.addMenu("Display Preference")
+        
+        spice_action = QAction("SPICE (Smooth, High-Latency)", self)
+        spice_action.setCheckable(True)
+        
+        lg_action = QAction("Looking Glass (Fast, Low-Lag)", self)
+        lg_action.setCheckable(True)
+
+        # Check the currently saved preference
+        current_pref = self.manager.get_display_preference(domain)
+        if current_pref == "looking-glass":
+            lg_action.setChecked(True)
+        else:
+            spice_action.setChecked(True)
+
+        # Connect signals
+        spice_action.triggered.connect(lambda: self.on_set_display_pref(domain, "spice"))
+        lg_action.triggered.connect(lambda: self.on_set_display_pref(domain, "looking-glass"))
+        
+        display_menu.addAction(spice_action)
+        display_menu.addAction(lg_action)
+        
+        # --- Guest Tools ---
+        menu.addSeparator()
+        tools_action = QAction("Install Guest Tools (VirtIO)", self)
+        tools_action.setEnabled(vm.state == VMState.RUNNING)
+        tools_action.triggered.connect(self._on_install_guest_tools)
+        menu.addAction(tools_action)
+        
+        menu.exec(self.vm_list.mapToGlobal(pos))
+
+    @Slot()
+    def on_set_display_pref(self, domain, preference):
+        """Slot to save the display preference."""
+        self.manager.set_display_preference(domain, preference)
+        logger.info(f"Set display preference for {domain.name()} to {preference}")
+
+    @Slot()
+    def _on_install_guest_tools(self):
+        """Slot to trigger guest tools installation."""
+        domain = self._get_selected_domain()
+        if not domain:
+            return
+            
+        logger.info(f"Attempting to install guest tools for {domain.name()}...")
+        # We need to add this method to the controller
+        # self.controller.install_guest_tools(domain.UUIDString()) 
+        QMessageBox.information(self, "Guest Tools",
+            "Guest tools installation logic will be added in Phase 2.\n"
+            "This will find the virtio ISO and run the installer.")

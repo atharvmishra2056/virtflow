@@ -8,12 +8,14 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QSizeGrip, QStatusBar, QVBoxLayout, QFrame,
     QMessageBox
 )
-from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QIcon
+from PySide6.QtCore import Qt, QSize, QProcess, Slot
+from PySide6.QtGui import QIcon, QGuiApplication
 
 import config
 from utils.logger import logger
 from models.vm_model import VMModel # Import for type hint
+import os
+import subprocess
 
 # --- NEW UI IMPORTS ---
 from ui.title_bar import TitleBarWidget
@@ -114,12 +116,15 @@ class MainWindow(QMainWindow):
         # Connect "Create VM" button
         self.sidebar.new_vm_btn.clicked.connect(self._on_create_vm)
         
-        # Connect search functionality
+        # Connect search signal from title bar to sidebar filtering
         self.title_bar.search_changed.connect(self.sidebar.filter_vms)
         
-        # Connect setup menu actions (we will create these in Phase 1)
-        # self.title_bar.setup_sudo_action.triggered.connect(...) 
-
+        # --- NEW: Connect Setup Menu Actions ---
+        self.title_bar.setup_sudo_action.triggered.connect(self._on_setup_sudo)
+        self.title_bar.setup_hooks_action.triggered.connect(self._on_setup_hooks)
+        self.title_bar.setup_lg_action.triggered.connect(self._on_install_looking_glass)
+        # --- END NEW ---
+        
     def _add_resizers(self):
         """Add resize grips to corners for window resizing"""
         # Bottom-right corner grip (most important)
@@ -210,3 +215,187 @@ class MainWindow(QMainWindow):
         wizard = CreateVMWizard(self)
         wizard.vm_created.connect(self.sidebar.refresh_vm_list)
         wizard.exec()
+
+    # --- NEW: Sudo setup dialog ---
+    @Slot()
+    def _on_setup_sudo(self):
+        from backend.vfio_manager import VFIOManager
+        sudo_file_path = "/etc/sudoers.d/virtflow-gpu"
+        
+        if os.path.exists(sudo_file_path):
+             QMessageBox.information(self, "Permissions OK",
+                f"Sudo permissions file already exists at:\n{sudo_file_path}\n\n"
+                "No action needed.")
+             return
+
+        sudo_content = VFIOManager.get_sudoers_content()
+        cmd = f"sudo EDITOR='tee' visudo -f {sudo_file_path}"
+
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Action Required: Sudo Permissions")
+        msg.setIcon(QMessageBox.Warning)
+        msg.setText(
+            "VirtFlow needs passwordless `sudo` access for specific commands "
+            "(like `modprobe`) to manage GPU drivers.\n\n"
+            "This is the safest method as it validates the file's syntax."
+        )
+        msg.setInformativeText(f"<b>Command to run:</b><pre>{cmd}</pre>"
+                               "Click 'Copy Command', paste it in your terminal, "
+                               "and then paste the content (from 'Show Details') when prompted by `tee`.")
+        msg.setDetailedText(f"--- Content to paste: ---\n\n{sudo_content}")
+        
+        copy_cmd_btn = msg.addButton("Copy Command", QMessageBox.ActionRole)
+        msg.addButton("Done", QMessageBox.AcceptRole)
+
+        msg.exec()
+
+        if msg.clickedButton() == copy_cmd_btn:
+            QGuiApplication.clipboard().setText(cmd)
+            QMessageBox.information(self, "Command Copied", "Command copied to clipboard. Please paste it into your terminal.")
+
+    # --- NEW: Libvirt hook setup dialog ---
+    @Slot()
+    def _on_setup_hooks(self):
+        hook_file_path = "/etc/libvirt/hooks/qemu"
+        
+        if os.path.exists(hook_file_path):
+            QMessageBox.information(self, "Hook Already Exists",
+                f"The libvirt hook file already exists:\n{hook_file_path}\n\n"
+                "VirtFlow will not overwrite it. Please ensure it contains the "
+                "logic from the VirtFlow documentation if you set it up manually.")
+            return
+
+        # Fetch content from the install script.
+        # This is safer than reading the file in case it moves.
+        hook_content = """#!/bin/bash
+# Libvirt QEMU hook for GPU passthrough management
+# This hook is called by libvirt when VM state changes
+
+GUEST_NAME="$1"
+OPERATION="$2"
+SUB_OPERATION="$3"
+
+LOG_FILE="/var/log/libvirt/qemu-hook.log"
+
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$GUEST_NAME] $1" >> "$LOG_FILE"
+}
+
+# Check if VM has GPU passthrough (look for hostdev in XML)
+has_gpu_passthrough() {
+    virsh dumpxml "$GUEST_NAME" 2>/dev/null | grep -q '<hostdev.*type=.pci'
+}
+
+log "Hook called: operation=$OPERATION sub_operation=$SUB_OPERATION"
+
+if ! has_gpu_passthrough; then
+    log "No GPU passthrough detected, skipping"
+    exit 0
+fi
+
+case "$OPERATION" in
+    "prepare")
+        case "$SUB_OPERATION" in
+            "begin")
+                log "VM starting - GPU should already be bound to VFIO"
+                ;;
+        esac
+        ;;
+    
+    "release")
+        case "$SUB_OPERATION" in
+            "end")
+                log "VM stopped - GPU will be restored to host by vm_controller"
+                ;;
+        esac
+        ;;
+esac
+
+exit 0
+"""
+        msg = QMessageBox(self)
+        msg.setWindowTitle("Action Required: Install Libvirt Hook")
+        msg.setIcon(QMessageBox.Warning)
+        msg.setText(
+            "To automatically manage GPU states, VirtFlow uses a libvirt hook script.\n\n"
+            "Please run these commands in a terminal to create and enable the hook."
+        )
+        
+        cmd1 = f"echo '{hook_content}' | sudo tee {hook_file_path}"
+        cmd2 = f"sudo chmod +x {hook_file_path}"
+        cmd3 = "sudo systemctl restart libvirtd"
+
+        msg.setInformativeText(
+            f"<b>Commands to run (one by one):</b>\n"
+            f"<pre>{cmd1}</pre>\n"
+            f"<pre>{cmd2}</pre>\n"
+            f"<pre>{cmd3}</pre>"
+        )
+        msg.addButton("Done", QMessageBox.AcceptRole)
+        msg.exec()
+
+
+    # --- NEW: Logic moved from vm_list_widget.py ---
+    @Slot()
+    def _on_install_looking_glass(self):
+        from backend.looking_glass_manager import LookingGlassManager
+        
+        lg_manager = LookingGlassManager()
+        
+        if lg_manager.looking_glass_installed:
+            QMessageBox.information(
+                self,
+                "Already Installed",
+                "Looking Glass client is already installed!\n\n"
+                f"Location: {subprocess.run(['which', 'looking-glass-client'], capture_output=True, text=True).stdout.strip()}\n\n"
+                "You can now use the 'Display Preference' menu on a VM."
+            )
+            return
+        
+        reply = QMessageBox.question(
+            self,
+            "Install Looking Glass Client",
+            "This will attempt to install the Looking Glass client by compiling it from source.\n\n"
+            "This requires `sudo` access to install build dependencies (like cmake, libdecor-dev) and the final binary.\n\n"
+            "A terminal window will open. You may need to enter your password there.\n"
+            "This may take 5-10 minutes.\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply != QMessageBox.Yes:
+            return
+        
+        # --- This now uses the embedded script ---
+        try:
+            # 1. Get the content of the install script
+            script_path = config.BASE_DIR.parent / "install_looking_glass.sh"
+            with open(script_path, 'r') as f:
+                script_content = f.read()
+            
+            # 2. Write it to a temp file
+            temp_script_path = "/tmp/virtflow_lg_install.sh"
+            with open(temp_script_path, 'w') as f:
+                f.write(script_content)
+            
+            os.chmod(temp_script_path, 0o755) # Make it executable
+
+            # 3. Launch it in a terminal
+            # This is the most reliable cross-platform way
+            QProcess.startDetached('x-terminal-emulator', ['-e', temp_script_path])
+            
+            QMessageBox.information(
+                self,
+                "Installation Started",
+                "Installation has started in a new terminal window.\n\n"
+                "Please follow the prompts and wait for it to complete, then restart VirtFlow."
+            )
+
+        except Exception as e:
+            logger.error(f"Failed to launch Looking Glass installer: {e}")
+            QMessageBox.critical(
+                self,
+                "Installation Failed",
+                f"Failed to launch the installer: {e}\n\n"
+                "Please run `install_looking_glass.sh` manually."
+            )

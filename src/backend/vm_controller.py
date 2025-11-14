@@ -196,11 +196,17 @@ class VMController:
                     return False # Failed to start
                 time.sleep(2)
 
+            # --- NEW: Get the display preference ---
+            preference = self.manager.get_display_preference(domain)
+            logger.info(f"Found display preference: {preference}")
+            # --- END NEW ---
+            
             success = self.viewer_manager.launch_viewer(
                 vm_name,
                 domain,
                 wait_for_vm=True,
-                fullscreen=fullscreen
+                fullscreen=fullscreen,
+                preference=preference # <-- Pass preference
             )
 
             if success:

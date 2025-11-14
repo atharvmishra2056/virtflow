@@ -122,7 +122,9 @@ class VMViewerManager:
         vm_name: str,
         domain: libvirt.virDomain,
         wait_for_vm: bool = True,
-        fullscreen: bool = False
+        fullscreen: bool = False,
+        # --- NEW: Preference passed from controller ---
+        preference: str = "spice" 
     ) -> bool:
         """
         Launch external SPICE/VNC viewer or Looking Glass for VM
@@ -132,14 +134,22 @@ class VMViewerManager:
             domain: libvirt domain object
             wait_for_vm: Wait for VM to start before launching viewer
             fullscreen: Launch viewer in fullscreen mode
+            preference: Display preference ('spice' or 'looking-glass')
             
         Returns:
             bool: Success status
         """
-        # Check if VM has Looking Glass configured
-        if self._check_looking_glass_configured(domain):
-            logger.info(f"VM has Looking Glass, launching Looking Glass client...")
+        # --- MODIFIED: Use preference, not auto-detection ---
+        if preference == "looking-glass":
+            logger.info(f"User preference is Looking Glass. Launching...")
+            if not self._check_looking_glass_configured(domain):
+                logger.error("Looking Glass launch requested, but VM is not configured.")
+                # We could pop up a message here, but for now, just fail.
+                return False
             return self._launch_looking_glass(vm_name, domain)
+        
+        # --- Fallback to SPICE ---
+        logger.info(f"User preference is SPICE. Launching virt-viewer...")
         
         if not self.viewer_binary:
             logger.error("No viewer binary available")

@@ -6,6 +6,11 @@ import libvirt
 from typing import List, Optional, Dict
 from utils.logger import logger
 import config
+import xml.etree.ElementTree as ET # <-- NEW: Import ET
+
+# --- NEW: Define our custom XML namespace ---
+VIRTFLOW_XML_NS = "https://virtflow.org/xmlns/domain/1.0"
+ET.register_namespace("virtflow", VIRTFLOW_XML_NS)
 
 
 class LibvirtManager:
@@ -188,6 +193,64 @@ class LibvirtManager:
         except libvirt.libvirtError:
             logger.warning(f"Storage pool '{pool_name}' not found")
             return None
+    
+    # --- NEW: Get Display Preference ---
+    def get_display_preference(self, domain: libvirt.virDomain) -> str:
+        """
+        Reads the preferred display type from VM metadata.
+        Returns 'spice' or 'looking-glass'. Defaults to 'spice'.
+        """
+        try:
+            xml_desc = domain.XMLDesc(0)
+            root = ET.fromstring(xml_desc)
+            # Find our custom metadata tag
+            # Note: ET.find() requires the namespace URI in curly braces
+            display_node = root.find(f".//{{{VIRTFLOW_XML_NS}}}display")
+            
+            if display_node is not None and display_node.get('type'):
+                return display_node.get('type')
+        except Exception as e:
+            logger.error(f"Could not read display preference: {e}")
+        
+        return "spice" # Default
+
+    # --- NEW: Set Display Preference ---
+    def set_display_preference(self, domain: libvirt.virDomain, preference: str):
+        """
+        Writes the preferred display type to VM metadata.
+        'preference' should be 'spice' or 'looking-glass'.
+        """
+        if preference not in ["spice", "looking-glass"]:
+            logger.warning(f"Invalid display preference: {preference}")
+            return
+
+        try:
+            xml_desc = domain.XMLDesc(0)
+            root = ET.fromstring(xml_desc)
+            
+            metadata_node = root.find("metadata")
+            if metadata_node is None:
+                metadata_node = ET.SubElement(root, "metadata")
+            
+            # Find or create our virtflow node
+            virtflow_node = metadata_node.find(f"{{{VIRTFLOW_XML_NS}}}virtflow")
+            if virtflow_node is None:
+                virtflow_node = ET.SubElement(metadata_node, f"{{{VIRTFLOW_XML_NS}}}virtflow")
+            
+            # Find or create the display node
+            display_node = virtflow_node.find(f"{{{VIRTFLOW_XML_NS}}}display")
+            if display_node is None:
+                display_node = ET.SubElement(virtflow_node, f"{{{VIRTFLOW_XML_NS}}}display")
+                
+            display_node.set("type", preference)
+            
+            # Re-define the VM with the updated XML
+            new_xml = ET.tostring(root, encoding="unicode")
+            self.connection.defineXML(new_xml)
+            logger.info(f"Set display preference for {domain.name()} to {preference}")
+            
+        except Exception as e:
+            logger.error(f"Failed to set display preference: {e}")
     
     def __del__(self):
         """Cleanup on deletion"""

@@ -3,10 +3,10 @@ TitleBarWidget (Nebula UI)
 With animated buttons and move/resize logic.
 """
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel, QFrame, QPushButton, QLineEdit
+    QWidget, QHBoxLayout, QLabel, QFrame, QPushButton, QLineEdit, QMenu
 )
 from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QAction
 import config
 
 # --- NEW: Custom animated title bar button ---
@@ -21,7 +21,8 @@ class TitleBarButton(QPushButton):
         
         self.main_icon = None
         if hover_icon_path:
-            self.main_icon = QIcon(str(config.BASE_DIR / hover_icon_path))
+            # --- FIX: Use config.ICONS_DIR ---
+            self.main_icon = QIcon(str(config.ICONS_DIR / hover_icon_path))
         
         self.setStyleSheet(f"""
             QPushButton {{
@@ -75,8 +76,8 @@ class TitleBarWidget(QFrame):
         
         # We need to find simple 'close', 'minimize' icons
         # Assuming you've downloaded them to src/ui/assets/icons/
-        self.close_btn = TitleBarButton("#ef4444") # Red
-        self.min_btn = TitleBarButton("#eab308") # Yellow
+        self.close_btn = TitleBarButton("#ef4444", "close.svg") # Red with close icon
+        self.min_btn = TitleBarButton("#eab308", "minimize.svg") # Yellow with minimize icon
         self.max_btn = TitleBarButton("#22c55e") # Green
         
         dots_layout.addWidget(self.close_btn)
@@ -145,11 +146,28 @@ class TitleBarWidget(QFrame):
         self.notifications_btn = QPushButton("🔔")  # Bell icon
         self.notifications_btn.setObjectName("GlassButton")
         self.notifications_btn.setFixedSize(36, 36)
-        
-        self.settings_btn = QPushButton("⚙️")  # Gear icon
-        self.settings_btn.setObjectName("GlassButton") 
+
+        # 4. User/Settings Icons with Setup Menu
+        self.settings_btn = QPushButton()
+        self.settings_btn.setObjectName("GlassButton")
         self.settings_btn.setFixedSize(36, 36)
-        
+        self.settings_btn.setIcon(QIcon(str(config.ICONS_DIR / "gear.svg"))) # Assumes gear.svg
+
+        # Create the setup menu
+        self.setup_menu = QMenu(self)
+        self.settings_btn.setMenu(self.setup_menu)
+
+        # Add actions
+        self.setup_sudo_action = QAction("1. Configure Sudo Permissions...", self)
+        self.setup_hooks_action = QAction("2. Install Libvirt Hooks...", self)
+        self.setup_lg_action = QAction("3. Install Looking Glass Client...", self)
+
+        self.setup_menu.addAction(self.setup_sudo_action)
+        self.setup_menu.addAction(self.setup_hooks_action)
+        self.setup_menu.addAction(self.setup_lg_action)
+        self.setup_menu.addSeparator()
+        self.setup_menu.addAction(QAction("Application Settings...", self))
+
         user_avatar = QLabel()
         user_avatar.setFixedSize(32, 32)
         user_avatar.setStyleSheet("""

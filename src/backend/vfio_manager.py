@@ -6,7 +6,7 @@ import subprocess
 import time
 from pathlib import Path
 from utils.logger import logger
-import os
+import os # <-- NEW: Import os
 
 
 class VFIOManager:
@@ -21,9 +21,10 @@ class VFIOManager:
         # Get the current username
         username = os.getenv("SUDO_USER", os.getenv("USER", "your_user"))
         
-        # This content is from your setup_sudo_permissions.sh
+        # This content is from your scripts/setup_sudo_permissions.sh
         content = f"""# VirtFlow GPU Passthrough - Passwordless sudo for specific operations
 # Created: {time.strftime("%Y-%m-%d")}
+# This file MUST be placed in /etc/sudoers.d/ and have 0440 permissions.
 
 # Allow tee for GPU binding (used to write to sysfs)
 {username} ALL=(root) NOPASSWD: /usr/bin/tee
