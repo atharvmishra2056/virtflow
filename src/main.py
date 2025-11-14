@@ -6,7 +6,7 @@ Modern GPU Passthrough Virtual Machine Manager
 
 import sys
 import os
-from pathlib import Path
+from pathlib import Path  # <-- Import Path
 
 # PySide6 imports
 from PySide6.QtWidgets import QApplication, QMessageBox, QDialog
@@ -87,6 +87,16 @@ def main():
     # Setup logging
     logger = setup_logger()
     logger.info(f"Starting {config.APP_NAME} v{config.APP_VERSION}")
+    
+    # --- NEW: Load the Global Stylesheet ---
+    try:
+        style_path = config.STYLES_DIR / "main_style.qss"
+        with open(style_path, "r") as f:
+            app.setStyleSheet(f.read())
+        logger.info(f"Loaded stylesheet: {style_path}")
+    except Exception as e:
+        logger.error(f"Failed to load stylesheet: {e}")
+    # --- END NEW SECTION ---
     
     # Check system requirements
     success, error_msg = check_system_requirements()

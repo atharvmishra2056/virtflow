@@ -13,12 +13,14 @@ from backend.libvirt_manager import LibvirtManager
 from backend.vm_controller import VMController, VMState
 from models.vm_model import VMModel
 from utils.logger import logger
+import time # <-- Import time
 
 
 class VMListWidget(QWidget):
     """Widget displaying list of VMs with controls"""
     
-    vm_selected = Signal(str)  # Emits VM UUID
+    # --- MODIFIED: Signal now emits VMModel and a stats dict ---
+    vm_selected = Signal(VMModel, dict)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -27,16 +29,23 @@ class VMListWidget(QWidget):
         self.manager = LibvirtManager()
         self.controller = VMController(self.manager)
         
+        self.vm_data = {}
+        
+        # --- NEW: Add state for calculating B/s deltas ---
+        self.prev_stats = {}
+        self.prev_time = {}
+        
         # Setup UI
         self._setup_ui()
         
         # Auto-refresh timer
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self.refresh_vm_list)
-        self.refresh_timer.start(3000)  # Refresh every 3 seconds
+        self.refresh_timer.start(1000)  # <-- Refresh every 1 second
         
-        # Initial load
+        # Initial load and button state
         self.refresh_vm_list()
+        self._update_selected_vm_ui()
     
     def _setup_ui(self):
         """Setup widget UI"""
@@ -57,16 +66,20 @@ class VMListWidget(QWidget):
         
         self.delete_btn = QPushButton("🗑 Delete")
         self.delete_btn.clicked.connect(self._on_delete_vm)
-        self.delete_btn.setStyleSheet("background-color: #C62828; color: white;")
+        # --- MODIFIED: Use ObjectName for styling ---
+        self.delete_btn.setObjectName("DeleteButton")
+        # self.delete_btn.setStyleSheet("background-color: #C62828; color: white;") # <-- REMOVE
         
         self.refresh_btn = QPushButton("↻ Refresh")
         self.refresh_btn.clicked.connect(self.refresh_vm_list)
 
         self.gpu_activate_btn = QPushButton("🎮 Activate GPU")
         self.gpu_activate_btn.clicked.connect(self._on_activate_gpu)
+        # self.gpu_activate_btn.setObjectName("AccentButton") # <-- Optional: for special color
         
         self.looking_glass_btn = QPushButton("👁️ Setup Looking Glass")
         self.looking_glass_btn.clicked.connect(self._on_setup_looking_glass)
+        # self.looking_glass_btn.setObjectName("AccentButton") # <-- Optional: for special color
         
         self.install_lg_btn = QPushButton("📥 Install Looking Glass")
         self.install_lg_btn.clicked.connect(self._on_install_looking_glass)
@@ -109,41 +122,44 @@ class VMListWidget(QWidget):
         
         layout.addWidget(self.table)
         
-        # Apply dark theme to table
-        self.table.setStyleSheet("""
-            QTableWidget {
-                background-color: #2B2B2B;
-                color: #FFFFFF;
-                gridline-color: #3E3E3E;
-                border: 1px solid #3E3E3E;
-            }
-            QTableWidget::item:selected {
-                background-color: #0D7377;
-            }
-            QHeaderView::section {
-                background-color: #1E1E1E;
-                color: #FFFFFF;
-                padding: 5px;
-                border: 1px solid #3E3E3E;
-            }
-        """)
+        # --- REMOVE INLINE STYLESHEET ---
+        # self.table.setStyleSheet(""" ... """)
     
     def refresh_vm_list(self):
         """Refresh VM list from libvirt"""
         try:
             domains = self.manager.list_all_vms()
             
-            # Clear table
+            # --- MODIFIED: Store current selection ---
+            self.vm_data.clear()
+            current_uuid = self._get_selected_uuid()
+            
+            # Disable selection changed signal during update
+            self.table.itemSelectionChanged.disconnect(self._on_selection_changed)
+            
             self.table.setRowCount(0)
             
-            # Populate table
+            new_vm_models = []
             for domain in domains:
                 info = self.controller.get_vm_info(domain)
                 if not info:
                     continue
                 
                 vm = VMModel.from_libvirt_info(info)
+                new_vm_models.append(vm)
                 self._add_vm_to_table(vm)
+            
+            # --- NEW: Update data cache ---
+            self.vm_data = {vm.uuid: vm for vm in new_vm_models}
+            
+            if current_uuid:
+                self._select_vm_by_uuid(current_uuid)
+                
+            # --- NEW: Update all UI based on new data ---
+            self._update_selected_vm_ui()
+            
+            # Re-enable signal
+            self.table.itemSelectionChanged.connect(self._on_selection_changed)
             
             logger.debug(f"Refreshed VM list: {len(domains)} VMs")
             
@@ -155,8 +171,10 @@ class VMListWidget(QWidget):
         row = self.table.rowCount()
         self.table.insertRow(row)
         
-        # Name
-        self.table.setItem(row, 0, QTableWidgetItem(vm.name))
+        # Store UUID in the first item's UserRole for persistent selection
+        name_item = QTableWidgetItem(vm.name)
+        name_item.setData(Qt.UserRole, vm.uuid)
+        self.table.setItem(row, 0, name_item)
         
         # State (with color coding)
         state_item = QTableWidgetItem(vm.state_name)
@@ -178,16 +196,34 @@ class VMListWidget(QWidget):
         
         # UUID
         self.table.setItem(row, 5, QTableWidgetItem(vm.uuid))
-    
-    def _get_selected_vm(self):
-        """Get currently selected VM domain"""
+
+    def _get_selected_uuid(self):
         selected = self.table.selectedItems()
         if not selected:
-            QMessageBox.warning(self, "No Selection", "Please select a VM first")
+            return None
+        return self.table.item(selected[0].row(), 0).data(Qt.UserRole)
+
+    def _select_vm_by_uuid(self, uuid_to_select):
+        for row in range(self.table.rowCount()):
+            uuid_in_row = self.table.item(row, 0).data(Qt.UserRole)
+            if uuid_in_row == uuid_to_select:
+                # Block signals to prevent _on_selection_changed from firing
+                self.table.blockSignals(True)
+                self.table.selectRow(row)
+                self.table.blockSignals(False)
+                return
+
+    def _get_selected_vm(self):
+        """Get currently selected VM domain"""
+        uuid = self._get_selected_uuid()
+        if not uuid:
+            # QMessageBox.warning(self, "No Selection", "Please select a VM first") # <-- Too noisy
             return None
         
-        row = selected[0].row()
-        vm_name = self.table.item(row, 0).text()
+        if uuid not in self.vm_data: # <-- Add check
+            return None
+            
+        vm_name = self.vm_data[uuid].name
         
         domain = self.manager.get_vm_by_name(vm_name)
         if not domain:
@@ -203,11 +239,9 @@ class VMListWidget(QWidget):
         
         vm_name = domain.name()
         
-        # Disable button to prevent double-click
         self.start_btn.setEnabled(False)
         self.start_btn.setText("Starting...")
         
-        # Start VM in background thread to prevent UI freeze
         from PySide6.QtCore import QThread, Signal
         
         class VMStartWorker(QThread):
@@ -220,13 +254,11 @@ class VMListWidget(QWidget):
             
             def run(self):
                 try:
-                    # Check if VM has GPU passthrough
                     xml_str = self.domain.XMLDesc(0)
                     has_gpu = '<hostdev' in xml_str and 'type=\'pci\'' in xml_str
                     
                     if has_gpu:
                         logger.info("VM has GPU passthrough, ensuring GPU is bound to VFIO...")
-                        # Import here to avoid circular dependency
                         from backend.gpu_detector import GPUDetector
                         from backend.vfio_manager import VFIOManager
                         
@@ -237,7 +269,6 @@ class VMListWidget(QWidget):
                             gpu = passthrough_gpus[0]
                             vfio_manager = VFIOManager()
                             
-                            # Check if already bound
                             import subprocess
                             result = subprocess.run(
                                 ['lspci', '-k', '-s', gpu.pci_address.split(':', 1)[1]],
@@ -263,20 +294,15 @@ class VMListWidget(QWidget):
                     self.finished.emit(False, str(e))
         
         def on_start_finished(success, error):
-            self.start_btn.setEnabled(True)
-            self.start_btn.setText("▶ Start")
-            
             if success:
-                # Launch viewer after short delay
                 from PySide6.QtCore import QTimer
                 QTimer.singleShot(2000, lambda: self._launch_viewer(vm_name))
-                # Refresh list
                 self.refresh_vm_list()
             else:
                 from PySide6.QtWidgets import QMessageBox
                 QMessageBox.critical(self, "Error", f"Failed to start VM:\n{error}")
+                self.refresh_vm_list()
         
-        # Create and start worker
         self._start_worker = VMStartWorker(domain, vm_name)
         self._start_worker.finished.connect(on_start_finished)
         self._start_worker.start()
@@ -284,14 +310,11 @@ class VMListWidget(QWidget):
     def _launch_viewer(self, vm_name: str):
         """Launch VM viewer - automatically detects Looking Glass or SPICE"""
         try:
-            # Get domain object using the correct method
             domain = self.controller.manager.get_vm_by_name(vm_name)
             if not domain:
                 logger.error(f"Failed to get domain for '{vm_name}'")
                 return
             
-            # Use vm_viewer_manager to launch appropriate viewer
-            # It will automatically detect Looking Glass and launch it, or fall back to virt-viewer
             success = self.controller.viewer_manager.launch_viewer(
                 vm_name=vm_name,
                 domain=domain,
@@ -348,11 +371,68 @@ class VMListWidget(QWidget):
     
     def _on_selection_changed(self):
         """Handle table selection change"""
-        selected = self.table.selectedItems()
-        if selected:
-            row = selected[0].row()
-            uuid = self.table.item(row, 5).text()
-            self.vm_selected.emit(uuid)
+        # --- MODIFIED: Just call the central update function ---
+        self._update_selected_vm_ui()
+
+    # --- NEW: This is the new central function for all UI updates ---
+    def _update_selected_vm_ui(self):
+        uuid = self._get_selected_uuid()
+        
+        if not uuid or uuid not in self.vm_data:
+            # No selection
+            self.start_btn.setEnabled(False)
+            self.stop_btn.setEnabled(False)
+            self.reboot_btn.setEnabled(False)
+            self.delete_btn.setEnabled(False)
+            self.gpu_activate_btn.setEnabled(False)
+            self.looking_glass_btn.setEnabled(False)
+            self.vm_selected.emit(None, {}) # Emit empty data
+            return
+
+        vm = self.vm_data[uuid]
+        is_running = vm.state == VMState.RUNNING
+        is_off = vm.state == VMState.SHUTOFF
+        
+        # Part 1: Update Button States
+        self.start_btn.setEnabled(is_off)
+        self.stop_btn.setEnabled(is_running)
+        self.reboot_btn.setEnabled(is_running)
+        self.delete_btn.setEnabled(is_off) 
+        self.gpu_activate_btn.setEnabled(is_off)
+        self.looking_glass_btn.setEnabled(is_off)
+        
+        # Part 2: Calculate Stats and Emit
+        stats = {}
+        if is_running:
+            current_time = time.time()
+            
+            if uuid in self.prev_stats:
+                time_delta = current_time - self.prev_time.get(uuid, current_time)
+                if time_delta > 0:
+                    stats['disk_read'] = (vm.disk_read_bytes - self.prev_stats[uuid]['disk_read_bytes']) / time_delta
+                    stats['disk_write'] = (vm.disk_write_bytes - self.prev_stats[uuid]['disk_write_bytes']) / time_delta
+                    stats['net_rx'] = (vm.net_rx_bytes - self.prev_stats[uuid]['net_rx_bytes']) / time_delta
+                    stats['net_tx'] = (vm.net_tx_bytes - self.prev_stats[uuid]['net_tx_bytes']) / time_delta
+            
+            # Clamp negative values just in case of refresh anomaly
+            stats = {k: max(0, v) for k, v in stats.items()}
+
+            # Store current stats for next calculation
+            self.prev_stats[uuid] = {
+                'disk_read_bytes': vm.disk_read_bytes,
+                'disk_write_bytes': vm.disk_write_bytes,
+                'net_rx_bytes': vm.net_rx_bytes,
+                'net_tx_bytes': vm.net_tx_bytes
+            }
+            self.prev_time[uuid] = current_time
+        else:
+            # Clear old stats if VM is off
+            if uuid in self.prev_stats:
+                del self.prev_stats[uuid]
+            if uuid in self.prev_time:
+                del self.prev_time[uuid]
+        
+        self.vm_selected.emit(vm, stats)
 
     def _on_activate_gpu(self):
         """Handle GPU activation button"""
@@ -447,6 +527,7 @@ class VMListWidget(QWidget):
         
         # Check if already installed
         if lg_manager.looking_glass_installed:
+            import subprocess
             QMessageBox.information(
                 self,
                 "Already Installed",
@@ -505,6 +586,7 @@ class VMListWidget(QWidget):
                 "4. Enjoy GPU-accelerated display!"
             )
         else:
+            import subprocess
             QMessageBox.critical(
                 self,
                 "Installation Failed",

@@ -12,6 +12,7 @@ from PySide6.QtGui import QAction, QIcon
 import config
 from utils.logger import logger
 from ui.vm_list_widget import VMListWidget
+from models.vm_model import VMModel
 
 
 class MainWindow(QMainWindow):
@@ -27,7 +28,10 @@ class MainWindow(QMainWindow):
         self._create_menu_bar()
         self._create_toolbar()
         self._create_status_bar()
-        self._apply_theme()
+        # self._apply_theme()  <-- REMOVE THIS LINE
+        
+        # Connect the vm_selected signal to our new slot
+        self.vm_list.vm_selected.connect(self.update_status_bar)
         
         logger.info("MainWindow initialized")
     
@@ -44,19 +48,23 @@ class MainWindow(QMainWindow):
         
         # Welcome header
         header = QLabel(f"Welcome to {config.APP_NAME}")
-        header.setStyleSheet("font-size: 24px; font-weight: bold; color: #FFFFFF;")
+        # --- REMOVE INLINE STYLE ---
+        # header.setStyleSheet("font-size: 24px; font-weight: bold; color: #FFFFFF;")
         header.setAlignment(Qt.AlignCenter)
         layout.addWidget(header)
         
         # Subtitle
         subtitle = QLabel("Modern GPU Passthrough Virtual Machine Manager")
-        subtitle.setStyleSheet("font-size: 14px; color: #AAAAAA;")
+        # --- REMOVE INLINE STYLE ---
+        # subtitle.setStyleSheet("font-size: 14px; color: #AAAAAA;")
         subtitle.setAlignment(Qt.AlignCenter)
         layout.addWidget(subtitle)
         
         layout.addStretch()
         
         self.vm_list = VMListWidget()
+        # --- NEW: Add ObjectName for styling ---
+        self.vm_list.setObjectName("VMList")
         layout.addWidget(self.vm_list)
    
     def _create_menu_bar(self):
@@ -83,6 +91,7 @@ class MainWindow(QMainWindow):
         
         refresh_action = QAction("&Refresh", self)
         refresh_action.setShortcut("F5")
+        refresh_action.triggered.connect(self.vm_list.refresh_vm_list)
         view_menu.addAction(refresh_action)
         
         # Tools menu
@@ -114,38 +123,68 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         
         refresh_action = QAction("Refresh", self)
+        refresh_action.triggered.connect(self.vm_list.refresh_vm_list)
         toolbar.addAction(refresh_action)
     
     def _create_status_bar(self):
         """Create status bar"""
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready")
+        
+        # --- MODIFIED: Create persistent labels with ObjectNames ---
+        self.status_vm_name = QLabel("No VM Selected")
+        self.status_vm_name.setObjectName("StatusVMName")
+        
+        self.status_vm_state = QLabel("State: N/A")
+        self.status_vm_state.setObjectName("StatusVMState")
+        
+        self.status_disk_io = QLabel("Disk: 0 B/s")
+        self.status_disk_io.setObjectName("StatusDiskIO")
+        
+        self.status_net_io = QLabel("Net: 0 B/s")
+        self.status_net_io.setObjectName("StatusNetIO")
+        
+        # Add widgets permanently
+        self.status_bar.addPermanentWidget(self.status_vm_name)
+        self.status_bar.addPermanentWidget(self.status_vm_state)
+        self.status_bar.addPermanentWidget(self.status_disk_io)
+        self.status_bar.addPermanentWidget(self.status_net_io)
+        # --- END MODIFIED SECTION ---
     
-    def _apply_theme(self):
-        """Apply application theme"""
-        # This will be enhanced in Phase 7 with proper QSS
-        self.setStyleSheet("""
-            QMainWindow {
-                background-color: #1E1E1E;
-            }
-            QPushButton {
-                background-color: #0D7377;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 10px 20px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #14FFEC;
-                color: #1E1E1E;
-            }
-            QPushButton:pressed {
-                background-color: #0A5F62;
-            }
-        """)
+    # --- NEW: Helper to format bytes ---
+    def _format_bytes_per_sec(self, bytes_val):
+        if bytes_val < 1024:
+            return f"{bytes_val:.0f} B/s"
+        elif bytes_val < 1024**2:
+            return f"{bytes_val/1024:.1f} KB/s"
+        elif bytes_val < 1024**3:
+            return f"{bytes_val/1024**2:.1f} MB/s"
+        else:
+            return f"{bytes_val/1024**3:.1f} GB/s"
+
+    # --- MODIFIED: Public method to update status bar text ---
+    def update_status_bar(self, vm: VMModel, stats: dict):
+        if vm:
+            self.status_vm_name.setText(f"VM: {vm.name}")
+            self.status_vm_state.setText(f"State: {vm.state_name}")
+            
+            disk_r = self._format_bytes_per_sec(stats.get('disk_read', 0))
+            disk_w = self._format_bytes_per_sec(stats.get('disk_write', 0))
+            net_rx = self._format_bytes_per_sec(stats.get('net_rx', 0))
+            net_tx = self._format_bytes_per_sec(stats.get('net_tx', 0))
+
+            self.status_disk_io.setText(f"Disk: R: {disk_r} W: {disk_w}")
+            self.status_net_io.setText(f"Net: RX: {net_rx} TX: {net_tx}")
+        else:
+            # No VM selected
+            self.status_vm_name.setText("No VM Selected")
+            self.status_vm_state.setText("State: N/A")
+            self.status_disk_io.setText("Disk: 0 B/s")
+            self.status_net_io.setText("Net: 0 B/s")
+    
+    # --- DELETE THE ENTIRE _apply_theme METHOD ---
+    # def _apply_theme(self):
+    #     ...
     
     # Slot methods
     def _on_create_vm(self):

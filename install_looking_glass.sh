@@ -49,7 +49,8 @@ sudo apt install -y \
     libpulse-dev \
     libsamplerate0-dev \
     git \
-    wget
+    wget \
+    libdecor-0-dev # <--- ADD THIS LINE
 
 echo ""
 echo -e "${GREEN}✓ Dependencies installed${NC}"
@@ -97,7 +98,8 @@ cmake ../ \
     -DENABLE_WAYLAND=ON \
     -DENABLE_X11=ON \
     -DENABLE_PIPEWIRE=ON \
-    -DENABLE_PULSEAUDIO=ON
+    -DENABLE_PULSEAUDIO=ON \
+    -DENABLE_LIBDECOR=ON # <--- ADD THIS LINE
 
 # Build (use all CPU cores)
 make -j$(nproc)
