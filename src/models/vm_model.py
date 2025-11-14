@@ -23,6 +23,12 @@ class VMModel:
     has_gpu_passthrough: bool = False
     gpu_vendor: Optional[str] = None
     
+    # --- ADD THESE 4 LINES ---
+    disk_read_bytes: int = 0
+    disk_write_bytes: int = 0
+    net_rx_bytes: int = 0
+    net_tx_bytes: int = 0
+    
     @property
     def memory_gb(self) -> float:
         """Get current memory in GB"""
@@ -46,5 +52,10 @@ class VMModel:
             max_memory_mb=info['max_memory'] // 1024,
             current_memory_mb=info['memory'] // 1024,
             vcpus=info['vcpus'],
-            autostart=info['autostart']
+            autostart=info['autostart'],
+            # --- ADD THESE 4 LINES (with .get() for safety) ---
+            disk_read_bytes=info.get('disk_read_bytes', 0),
+            disk_write_bytes=info.get('disk_write_bytes', 0),
+            net_rx_bytes=info.get('net_rx_bytes', 0),
+            net_tx_bytes=info.get('net_tx_bytes', 0)
         )

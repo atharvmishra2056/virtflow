@@ -109,7 +109,7 @@ class VMViewerManager:
             # Check for IVSHMEM device named 'looking-glass'
             for shmem in root.findall('.//devices/shmem'):
                 if shmem.get('name') == 'looking-glass':
-                    logger.info(f"VM has Looking Glass configured")
+                    logger.debug(f"VM has Looking Glass configured")
                     return True
             
             return False
@@ -303,7 +303,12 @@ class VMViewerManager:
                 'looking-glass-client',
                 '-f', '/dev/shm/looking-glass',
                 '-p', '0',  # Manual capture with ScrollLock
-                '-C', config_file  # Use config file for window settings
+                '-C', config_file,  # Use config file for window settings
+                
+                # --- ADD THESE 3 LINES FOR REDUNDANCY ---
+                '-o', 'win:borderless=no',
+                '-o', 'win:maximize=no',
+                '-o', 'win:allowResize=yes'
             ]
             
             # Add SPICE connection if available

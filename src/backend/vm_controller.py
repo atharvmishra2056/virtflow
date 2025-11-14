@@ -60,20 +60,58 @@ class VMController:
         try:
             state, reason = domain.state()
             info = domain.info()
+            is_active = domain.isActive() == 1
             
-            return {
+            vm_info = {
                 'name': domain.name(),
                 'uuid': domain.UUIDString(),
                 'state': state,
                 'state_name': VMState.STATE_NAMES.get(state, "Unknown"),
-                'is_active': domain.isActive() == 1,
+                'is_active': is_active,
                 'is_persistent': domain.isPersistent() == 1,
                 'max_memory': info[1],  # KB
                 'memory': info[2],  # KB
                 'vcpus': info[3],
                 'cpu_time': info[4],  # nanoseconds
-                'autostart': domain.autostart() == 1
+                'autostart': domain.autostart() == 1,
+                # --- NEW: Add defaults for stats ---
+                'disk_read_bytes': 0,
+                'disk_write_bytes': 0,
+                'net_rx_bytes': 0,
+                'net_tx_bytes': 0
             }
+
+            # --- NEW: If running, get I/O stats ---
+            if is_active:
+                try:
+                    # Parse XML to find disk and net devices
+                    xml_desc = domain.XMLDesc(0)
+                    root = ET.fromstring(xml_desc)
+                    
+                    # Find first virtio disk (vda)
+                    disk_target = root.find(".//devices/disk[@device='disk']/target")
+                    if disk_target is not None:
+                        disk_dev = disk_target.get('dev')
+                        # blockStats returns [rd_req, rd_bytes, wr_req, wr_bytes, errs]
+                        stats = domain.blockStats(disk_dev)
+                        vm_info['disk_read_bytes'] = stats[1]
+                        vm_info['disk_write_bytes'] = stats[3]
+
+                    # Find first interface
+                    net_target = root.find(".//devices/interface/target")
+                    if net_target is not None:
+                        net_dev = net_target.get('dev')
+                        # interfaceStats returns [rx_bytes, rx_pkts, rx_errs, rx_drop, tx_bytes, tx_pkts, tx_errs, tx_drop]
+                        stats = domain.interfaceStats(net_dev)
+                        vm_info['net_rx_bytes'] = stats[0]
+                        vm_info['net_tx_bytes'] = stats[4]
+                        
+                except libvirt.libvirtError as e:
+                    # This can fail if devices are not ready, just log it
+                    logger.debug(f"Could not fetch I/O stats for {domain.name()}: {e}")
+                
+            return vm_info
+            
         except libvirt.libvirtError as e:
             logger.error(f"Failed to get VM info: {e}")
             return {}
@@ -92,6 +130,38 @@ class VMController:
             if domain.isActive():
                 logger.warning(f"VM '{domain.name()}' is already running")
                 return True
+            
+            # --- NEW: Check for GPU and bind ---
+            xml_str = domain.XMLDesc(0)
+            has_gpu = '<hostdev' in xml_str and 'type=\'pci\'' in xml_str
+            
+            if has_gpu:
+                logger.info("VM has GPU passthrough, ensuring GPU is bound to VFIO...")
+                from backend.gpu_detector import GPUDetector
+                from backend.vfio_manager import VFIOManager
+                
+                detector = GPUDetector()
+                passthrough_gpus = detector.get_passthrough_gpus()
+                
+                if passthrough_gpus:
+                    gpu = passthrough_gpus[0]
+                    vfio_manager = VFIOManager()
+                    
+                    import subprocess
+                    result = subprocess.run(
+                        ['lspci', '-k', '-s', gpu.pci_address.split(':', 1)[1]],
+                        capture_output=True,
+                        text=True
+                    )
+                    
+                    if 'vfio-pci' not in result.stdout:
+                        logger.info("GPU not bound to VFIO, binding now...")
+                        if not vfio_manager.bind_gpu_to_vfio(gpu):
+                            logger.error("Failed to bind GPU to VFIO.")
+                            return False # Stop start process
+                        logger.info("GPU successfully bound to VFIO")
+                    else:
+                        logger.info("GPU already bound to VFIO")
             
             domain.create()
             logger.info(f"VM '{domain.name()}' started successfully")
@@ -121,7 +191,9 @@ class VMController:
 
             if not domain.isActive():
                 logger.info(f"Starting VM '{vm_name}'...")
-                domain.create()
+                # --- MODIFIED: Call our new start_vm ---
+                if not self.start_vm(domain):
+                    return False # Failed to start
                 time.sleep(2)
 
             success = self.viewer_manager.launch_viewer(
@@ -229,13 +301,15 @@ class VMController:
                         from backend.vfio_manager import VFIOManager
                         
                         detector = GPUDetector()
+                        # --- MODIFIED: We need to find the *actual* GPU passed to this VM ---
+                        # This is a simplification, a full solution would parse the XML
+                        # for the <hostdev> tags. For now, we assume the first passthrough-able GPU.
                         passthrough_gpus = detector.get_passthrough_gpus()
                         
                         if passthrough_gpus:
-                            gpu = passthrough_gpus[0]  # Assume first GPU
+                            gpu = passthrough_gpus[0]
                             vfio_manager = VFIOManager()
                             
-                            # Only unbind from VFIO, don't modify XML (already stopped)
                             logger.info(f"Restoring {gpu.full_name} to host driver...")
                             if vfio_manager.unbind_gpu_from_vfio(gpu):
                                 logger.info("GPU successfully restored to host")
@@ -244,6 +318,7 @@ class VMController:
                         
                         return
                 except Exception as e:
+                    # Catch libvirtError if domain disappears
                     logger.debug(f"Waiting for VM stop: {e}")
                 
                 time.sleep(1)
@@ -284,9 +359,14 @@ class VMController:
             bool: Success status
         """
         try:
-            domain.reboot()
-            logger.info(f"VM '{domain.name()}' reboot initiated")
-            return True
+            # --- MODIFIED: Use shutdown and wait for 'start_vm' to handle re-bind ---
+            if domain.isActive():
+                domain.reboot()
+                logger.info(f"VM '{domain.name()}' reboot initiated")
+                return True
+            else:
+                logger.warning(f"VM '{domain.name()}' is not running")
+                return False
         except libvirt.libvirtError as e:
             logger.error(f"Failed to reboot VM: {e}")
             return False

@@ -1,24 +1,41 @@
 #!/usr/bin/env python3
 """
 VirtFlow - Main Entry Point
-Modern GPU Passthrough Virtual Machine Manager
 """
 
 import sys
 import os
-from pathlib import Path  # <-- Import Path
+from pathlib import Path
 
 # PySide6 imports
 from PySide6.QtWidgets import QApplication, QMessageBox, QDialog
 from PySide6.QtCore import Qt, QCoreApplication
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QIcon, QFontDatabase
 
 # Local imports
+# --- NEW UI IMPORTS ---
 from ui.main_window import MainWindow
+# --- END NEW UI IMPORTS ---
 from utils.logger import setup_logger
 from backend.system_checker import SystemChecker
 import config
 
+def load_fonts():
+    """Load custom fonts from the assets directory."""
+    fonts_dir = config.BASE_DIR / "ui" / "assets" / "fonts"
+    font_files = list(fonts_dir.glob("*.ttf"))
+    
+    if not font_files:
+        logger.warning(f"No fonts found in {fonts_dir}. Using system defaults.")
+        return
+
+    for font_file in font_files:
+        font_id = QFontDatabase.addApplicationFont(str(font_file))
+        if font_id == -1:
+            logger.warning(f"Failed to load font: {font_file}")
+        else:
+            font_families = QFontDatabase.applicationFontFamilies(font_id)
+            logger.debug(f"Loaded font: {font_families[0]}")
 
 def check_system_requirements():
     """
@@ -85,12 +102,16 @@ def main():
     app = QApplication(sys.argv)
     
     # Setup logging
+    global logger # Make logger global for font loading
     logger = setup_logger()
     logger.info(f"Starting {config.APP_NAME} v{config.APP_VERSION}")
-    
-    # --- NEW: Load the Global Stylesheet ---
+
+    # --- NEW: Load Fonts ---
+    load_fonts()
+
+    # --- NEW: Load the Nebula Stylesheet ---
     try:
-        style_path = config.STYLES_DIR / "main_style.qss"
+        style_path = config.STYLES_DIR / "nebula.qss"
         with open(style_path, "r") as f:
             app.setStyleSheet(f.read())
         logger.info(f"Loaded stylesheet: {style_path}")
@@ -106,10 +127,10 @@ def main():
         if setup.exec() != QDialog.Accepted:
             return 1
     
-    # Set application icon
-    icon_path = config.ICONS_DIR / "app_icon.png"
-    if icon_path.exists():
-        app.setWindowIcon(QIcon(str(icon_path)))
+    # Set application icon (We'll make a new one later)
+    # icon_path = config.ICONS_DIR / "app_icon.png"
+    # if icon_path.exists():
+    #     app.setWindowIcon(QIcon(str(icon_path)))
     
     # Create and show main window
     try:

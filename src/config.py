@@ -11,6 +11,8 @@ APP_VERSION = "0.1.0"
 APP_AUTHOR = "Your Name"
 APP_DESCRIPTION = "Modern GPU Passthrough VM Manager"
 
+COLOR_BACKGROUND = "#0f172a"
+
 # Paths
 BASE_DIR = Path(__file__).resolve().parent
 ASSETS_DIR = BASE_DIR / "ui" / "assets"

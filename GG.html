@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nebula VM Manager | Next-Gen Virtualization</title>
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Phosphor Icons -->
+    <script src="https://unpkg.com/@phosphor-icons/web"></script>
+
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <style>
+        :root {
+            --glass-border: rgba(255, 255, 255, 0.2);
+            --glass-highlight: rgba(255, 255, 255, 0.1);
+            --glass-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            --accent-color: #6366f1;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #e2e8f0;
+        }
+
+        #canvas-container {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: -1;
+            filter: blur(80px); /* Extreme blur creates the ambient gradients */
+            transform: scale(1.2);
+        }
+
+        /* The "Real" Glass Effect */
+        .glass-panel {
+            background: linear-gradient(135deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.01));
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
+            border: 1px solid var(--glass-border);
+            border-top: 1px solid rgba(255, 255, 255, 0.4);
+            border-left: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 
+                0 8px 32px 0 rgba(0, 0, 0, 0.5),
+                inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+        }
+
+        /* Thick Glass Depth Simulation */
+        .glass-thick {
+            box-shadow: 
+                0 20px 50px rgba(0,0,0,0.5),
+                inset 0 1px 0 rgba(255,255,255,0.4),
+                inset 0 -1px 0 rgba(0,0,0,0.2),
+                inset 1px 0 0 rgba(255,255,255,0.2),
+                inset -1px 0 0 rgba(255,255,255,0.2);
+        }
+
+        .glass-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+        }
+
+        .glass-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.5);
+            box-shadow: 0 0 15px rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
+        }
+
+        .glass-btn:active {
+            transform: translateY(1px);
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .sidebar-item {
+            transition: all 0.2s ease;
+            border-left: 3px solid transparent;
+        }
+
+        .sidebar-item.active {
+            background: linear-gradient(90deg, rgba(99, 102, 241, 0.2), transparent);
+            border-left: 3px solid #6366f1;
+        }
+
+        .vm-preview {
+            perspective: 1000px;
+        }
+
+        .vm-screen {
+            transform-style: preserve-3d;
+            transition: transform 0.5s ease;
+            box-shadow: 0 0 50px rgba(0,0,0,0.5);
+        }
+
+        /* CRT Effect for Console */
+        .crt-scanline {
+            background: linear-gradient(
+                to bottom,
+                rgba(255,255,255,0),
+                rgba(255,255,255,0) 50%,
+                rgba(0,0,0,0.2) 50%,
+                rgba(0,0,0,0.2)
+            );
+            background-size: 100% 4px;
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.4);
+        }
+
+        /* Animations */
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 10px #22c55e; }
+            50% { box-shadow: 0 0 20px #22c55e, 0 0 5px #fff; }
+        }
+
+        .status-dot.running {
+            background-color: #22c55e;
+            animation: pulse-glow 2s infinite;
+        }
+
+        .status-dot.stopped {
+            background-color: #ef4444;
+        }
+        
+        .status-dot.paused {
+            background-color: #eab308;
+        }
+
+        .loader {
+            border-top-color: #6366f1;
+            -webkit-animation: spinner 1.5s linear infinite;
+            animation: spinner 1.5s linear infinite;
+        }
+        
+        @keyframes spinner {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="h-screen w-screen overflow-hidden flex items-center justify-center">
+
+    <!-- Dynamic Background -->
+    <div id="canvas-container"></div>
+
+    <!-- Main App Container -->
+    <div class="glass-panel glass-thick rounded-[2rem] w-[95vw] h-[92vh] flex flex-col overflow-hidden relative animate-fade-in">
+        
+        <!-- Title Bar -->
+        <div class="h-14 flex items-center justify-between px-6 border-b border-white/10 select-none">
+            <div class="flex items-center gap-3">
+                <div class="flex gap-2">
+                    <div class="w-3 h-3 rounded-full bg-red-500 shadow-inner"></div>
+                    <div class="w-3 h-3 rounded-full bg-yellow-500 shadow-inner"></div>
+                    <div class="w-3 h-3 rounded-full bg-green-500 shadow-inner"></div>
+                </div>
+                <div class="ml-4 flex items-center gap-2 opacity-80">
+                    <i class="ph ph-cube text-xl text-indigo-400"></i>
+                    <span class="font-semibold tracking-wide text-sm">NEBULA <span class="font-light opacity-70">VM</span></span>
+                </div>
+            </div>
+
+            <!-- Global Search -->
+            <div class="relative group w-96">
+                <i class="ph ph-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 group-hover:text-white transition-colors"></i>
+                <input type="text" placeholder="Search VMs, Snapshots, Settings..." 
+                       class="w-full bg-white/5 border border-white/10 rounded-xl py-1.5 pl-10 pr-4 text-sm text-white placeholder-gray-400 focus:outline-none focus:bg-white/10 focus:border-indigo-400/50 transition-all">
+            </div>
+
+            <!-- User / Settings -->
+            <div class="flex items-center gap-4">
+                <button class="glass-btn p-2 rounded-lg"><i class="ph ph-bell"></i></button>
+                <button class="glass-btn p-2 rounded-lg"><i class="ph ph-gear"></i></button>
+                <div class="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-500 border border-white/30"></div>
+            </div>
+        </div>
+
+        <!-- Content Area -->
+        <div class="flex flex-1 overflow-hidden">
+            
+            <!-- Sidebar -->
+            <nav class="w-72 border-r border-white/10 flex flex-col bg-black/10 backdrop-blur-md">
+                <div class="p-4">
+                    <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Your Machines</h3>
+                    
+                    <!-- VM List -->
+                    <div class="space-y-2" id="vm-list">
+                        <!-- VM Item 1 -->
+                        <div class="sidebar-item active cursor-pointer group rounded-lg p-3 flex items-center gap-3 hover:bg-white/5" onclick="selectVM(0)">
+                            <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-blue-600 to-cyan-500 flex items-center justify-center shadow-lg">
+                                <i class="ph ph-windows-logo text-white text-xl"></i>
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex justify-between items-center">
+                                    <h4 class="text-sm font-medium text-white">Windows 11 Dev</h4>
+                                    <div class="status-dot running w-2 h-2 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.8)]"></div>
+                                </div>
+                                <p class="text-xs text-gray-400 mt-0.5">Running • 16GB RAM</p>
+                            </div>
+                        </div>
+
+                        <!-- VM Item 2 -->
+                        <div class="sidebar-item cursor-pointer group rounded-lg p-3 flex items-center gap-3 hover:bg-white/5" onclick="selectVM(1)">
+                            <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-orange-600 to-red-500 flex items-center justify-center shadow-lg">
+                                <i class="ph ph-linux-logo text-white text-xl"></i>
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex justify-between items-center">
+                                    <h4 class="text-sm font-medium text-gray-200">Ubuntu Server</h4>
+                                    <div class="status-dot stopped w-2 h-2 rounded-full"></div>
+                                </div>
+                                <p class="text-xs text-gray-400 mt-0.5">Stopped • 8GB RAM</p>
+                            </div>
+                        </div>
+
+                        <!-- VM Item 3 -->
+                        <div class="sidebar-item cursor-pointer group rounded-lg p-3 flex items-center gap-3 hover:bg-white/5" onclick="selectVM(2)">
+                            <div class="w-10 h-10 rounded-lg bg-gradient-to-br from-gray-200 to-gray-400 flex items-center justify-center shadow-lg">
+                                <i class="ph ph-apple-logo text-black text-xl"></i>
+                            </div>
+                            <div class="flex-1">
+                                <div class="flex justify-between items-center">
+                                    <h4 class="text-sm font-medium text-gray-200">macOS Sequoia</h4>
+                                    <div class="status-dot paused w-2 h-2 rounded-full"></div>
+                                </div>
+                                <p class="text-xs text-gray-400 mt-0.5">Suspended • 32GB RAM</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-auto p-4 border-t border-white/10">
+                    <button class="w-full glass-btn py-2.5 rounded-xl flex items-center justify-center gap-2 text-sm font-medium text-indigo-300 hover:text-white">
+                        <i class="ph ph-plus-circle text-lg"></i>
+                        Create New VM
+                    </button>
+                </div>
+            </nav>
+
+            <!-- Main Stage -->
+            <main class="flex-1 flex flex-col relative">
+                
+                <!-- VM Toolbar -->
+                <div class="h-16 border-b border-white/10 flex items-center justify-between px-6 bg-white/5">
+                    <div class="flex items-center gap-4">
+                        <h2 class="text-xl font-semibold tracking-tight" id="active-vm-name">Windows 11 Dev</h2>
+                        <span class="px-2 py-0.5 rounded text-[10px] font-bold bg-green-500/20 text-green-400 border border-green-500/30" id="active-vm-status">RUNNING</span>
+                    </div>
+
+                    <div class="flex items-center gap-2">
+                        <button class="glass-btn p-2 px-4 rounded-lg flex items-center gap-2 text-green-400" onclick="togglePower()" id="btn-power">
+                            <i class="ph ph-power text-lg"></i> <span class="text-sm font-medium">Stop</span>
+                        </button>
+                        <button class="glass-btn p-2 rounded-lg text-yellow-400 hover:text-yellow-300"><i class="ph ph-pause text-lg"></i></button>
+                        <button class="glass-btn p-2 rounded-lg text-blue-400 hover:text-blue-300"><i class="ph ph-arrows-clockwise text-lg"></i></button>
+                        <div class="w-px h-6 bg-white/20 mx-2"></div>
+                        <button class="glass-btn p-2 rounded-lg text-gray-300"><i class="ph ph-camera text-lg"></i></button>
+                        <button class="glass-btn p-2 rounded-lg text-gray-300"><i class="ph ph-monitor text-lg"></i></button>
+                    </div>
+                </div>
+
+                <!-- Workspace -->
+                <div class="flex-1 p-8 flex gap-6 overflow-hidden">
+                    
+                    <!-- Center: The Screen -->
+                    <div class="flex-1 flex flex-col gap-4">
+                        <div class="bg-black rounded-xl flex-1 relative border border-white/20 shadow-2xl overflow-hidden group">
+                            <!-- VM Screen Content -->
+                            <div id="screen-content" class="absolute inset-0 bg-gray-900 flex items-center justify-center transition-opacity duration-500">
+                                <!-- Default Windows Wallpaper Mock -->
+                                <img src="https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop" class="w-full h-full object-cover opacity-80" alt="OS Wallpaper">
+                                <div class="absolute bottom-0 w-full h-12 bg-black/40 backdrop-blur-md border-t border-white/10 flex items-center justify-center gap-4">
+                                    <div class="w-8 h-8 bg-blue-500 rounded hover:bg-blue-400 transition-colors"></div>
+                                    <div class="w-8 h-8 bg-white/10 rounded"></div>
+                                    <div class="w-8 h-8 bg-white/10 rounded"></div>
+                                </div>
+                            </div>
+
+                            <!-- Boot Screen (Hidden by default) -->
+                            <div id="boot-screen" class="absolute inset-0 bg-black z-20 flex flex-col items-center justify-center hidden">
+                                <div class="loader ease-linear rounded-full border-4 border-t-4 border-gray-800 h-12 w-12 mb-4"></div>
+                                <span class="text-sm text-gray-400 font-mono">Booting System...</span>
+                            </div>
+
+                            <!-- Screen Reflection overlay -->
+                            <div class="absolute inset-0 bg-gradient-to-tr from-transparent via-white/5 to-transparent pointer-events-none"></div>
+                        </div>
+
+                        <!-- Console / Terminal Tab -->
+                        <div class="h-48 glass-panel rounded-xl p-0 flex flex-col overflow-hidden">
+                            <div class="flex border-b border-white/10 bg-black/20">
+                                <button class="px-4 py-2 text-xs font-medium text-white border-b-2 border-indigo-500 bg-white/5">Terminal</button>
+                                <button class="px-4 py-2 text-xs font-medium text-gray-400 hover:text-white transition-colors">Logs</button>
+                                <button class="px-4 py-2 text-xs font-medium text-gray-400 hover:text-white transition-colors">Network</button>
+                            </div>
+                            <div class="flex-1 bg-[#0c0c0c] p-3 font-[JetBrains Mono] text-xs text-green-400 overflow-y-auto relative">
+                                <div class="crt-scanline"></div>
+                                <div id="terminal-output">
+                                    <span class="opacity-50">root@nebula-vm:~#</span> systemctl status virtualization-service<br>
+                                    <span class="text-white">●</span> virtualization-service.service - Nebula Hypervisor Layer<br>
+                                    &nbsp;&nbsp;Loaded: loaded (/lib/systemd/system/nebula.service; enabled)<br>
+                                    &nbsp;&nbsp;Active: <span class="text-green-400 font-bold">active (running)</span> since Mon 2023-10-27 14:00:00 UTC<br>
+                                    &nbsp;&nbsp;Docs: man:nebula(1)<br>
+                                    <span class="opacity-50">root@nebula-vm:~#</span> _
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Panel: Stats -->
+                    <div class="w-72 flex flex-col gap-4">
+                        
+                        <!-- CPU Widget -->
+                        <div class="glass-panel rounded-xl p-4">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-xs font-bold text-gray-400 uppercase">CPU Usage</h3>
+                                <span class="text-xs font-mono text-indigo-300">8 cores</span>
+                            </div>
+                            <div class="relative h-24 w-full flex items-end gap-1">
+                                <!-- Generate Bars via JS -->
+                                <div class="w-full h-full flex items-end gap-1" id="cpu-bars">
+                                    <!-- JS will fill this -->
+                                </div>
+                            </div>
+                            <div class="mt-2 flex justify-between items-end">
+                                <span class="text-3xl font-light text-white" id="cpu-text">42%</span>
+                                <span class="text-xs text-green-400 flex items-center gap-1"><i class="ph ph-trend-up"></i> Stable</span>
+                            </div>
+                        </div>
+
+                        <!-- Memory Widget -->
+                        <div class="glass-panel rounded-xl p-4">
+                            <div class="flex justify-between items-center mb-4">
+                                <h3 class="text-xs font-bold text-gray-400 uppercase">Memory</h3>
+                                <span class="text-xs font-mono text-indigo-300">16 GB</span>
+                            </div>
+                            <div class="w-full bg-white/10 h-2 rounded-full overflow-hidden">
+                                <div class="bg-gradient-to-r from-indigo-500 to-purple-500 h-full w-[65%] rounded-full shadow-[0_0_10px_rgba(99,102,241,0.5)] transition-all duration-1000" id="ram-bar"></div>
+                            </div>
+                            <div class="mt-3 flex justify-between text-xs text-gray-400">
+                                <span>Used: <span class="text-white font-mono">10.4 GB</span></span>
+                                <span>Free: <span class="text-white font-mono">5.6 GB</span></span>
+                            </div>
+                        </div>
+
+                        <!-- Storage -->
+                        <div class="glass-panel rounded-xl p-4 flex-1 relative overflow-hidden">
+                            <div class="flex justify-between items-center mb-4 relative z-10">
+                                <h3 class="text-xs font-bold text-gray-400 uppercase">Storage</h3>
+                                <i class="ph ph-hard-drives text-lg text-indigo-400"></i>
+                            </div>
+                            
+                            <div class="space-y-4 relative z-10">
+                                <div>
+                                    <div class="flex justify-between text-xs mb-1">
+                                        <span class="text-gray-300">NVMe Drive C:</span>
+                                        <span class="text-gray-400">450GB / 1TB</span>
+                                    </div>
+                                    <div class="w-full bg-white/10 h-1.5 rounded-full">
+                                        <div class="bg-cyan-500 h-full w-[45%] rounded-full"></div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <div class="flex justify-between text-xs mb-1">
+                                        <span class="text-gray-300">Swap Vol</span>
+                                        <span class="text-gray-400">12GB / 32GB</span>
+                                    </div>
+                                    <div class="w-full bg-white/10 h-1.5 rounded-full">
+                                        <div class="bg-purple-500 h-full w-[30%] rounded-full"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Decorative 3D element -->
+                            <div class="absolute -bottom-10 -right-10 w-32 h-32 bg-indigo-600/20 rounded-full blur-2xl"></div>
+                        </div>
+
+                    </div>
+                </div>
+
+            </main>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script>
+        // --- Three.js Background Animation ---
+        const initThreeJS = () => {
+            const container = document.getElementById('canvas-container');
+            const scene = new THREE.Scene();
+            // Use a fog to blend edges
+            scene.fog = new THREE.FogExp2(0x0f172a, 0.002);
+
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+            
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+
+            // Lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+            
+            const pointLight = new THREE.PointLight(0x6366f1, 2, 100);
+            pointLight.position.set(10, 10, 10);
+            scene.add(pointLight);
+
+            const pointLight2 = new THREE.PointLight(0xe879f9, 2, 100);
+            pointLight2.position.set(-10, -10, -10);
+            scene.add(pointLight2);
+
+            // Floating Blobs (Spheres)
+            const geometry = new THREE.SphereGeometry(1, 64, 64);
+            const materials = [
+                new THREE.MeshStandardMaterial({ color: 0x4f46e5, roughness: 0.3, metalness: 0.1 }), // Indigo
+                new THREE.MeshStandardMaterial({ color: 0xc026d3, roughness: 0.3, metalness: 0.1 }), // Fuchsia
+                new THREE.MeshStandardMaterial({ color: 0x06b6d4, roughness: 0.3, metalness: 0.1 })  // Cyan
+            ];
+
+            const spheres = [];
+            for(let i = 0; i < 5; i++) {
+                const mesh = new THREE.Mesh(geometry, materials[i % materials.length]);
+                
+                // Random position
+                mesh.position.x = (Math.random() - 0.5) * 20;
+                mesh.position.y = (Math.random() - 0.5) * 10;
+                mesh.position.z = (Math.random() - 0.5) * 10 - 5;
+                
+                // Random scale
+                const scale = 1 + Math.random() * 3;
+                mesh.scale.set(scale, scale, scale);
+                
+                // Store velocity for animation
+                mesh.userData = {
+                    velX: (Math.random() - 0.5) * 0.02,
+                    velY: (Math.random() - 0.5) * 0.02,
+                    velZ: (Math.random() - 0.5) * 0.02
+                };
+
+                scene.add(mesh);
+                spheres.push(mesh);
+            }
+
+            camera.position.z = 10;
+
+            // Animation Loop
+            const animate = () => {
+                requestAnimationFrame(animate);
+
+                spheres.forEach(sphere => {
+                    sphere.position.x += sphere.userData.velX;
+                    sphere.position.y += sphere.userData.velY;
+                    sphere.position.z += sphere.userData.velZ;
+                    
+                    sphere.rotation.x += 0.001;
+                    sphere.rotation.y += 0.002;
+
+                    // Bounds check to keep them on screen
+                    if(sphere.position.x > 15 || sphere.position.x < -15) sphere.userData.velX *= -1;
+                    if(sphere.position.y > 10 || sphere.position.y < -10) sphere.userData.velY *= -1;
+                    if(sphere.position.z > 5 || sphere.position.z < -15) sphere.userData.velZ *= -1;
+                });
+
+                // Gentle camera sway
+                const time = Date.now() * 0.0005;
+                camera.position.x = Math.sin(time) * 0.5;
+                camera.position.y = Math.cos(time) * 0.5;
+                camera.lookAt(0,0,0);
+
+                renderer.render(scene, camera);
+            };
+
+            animate();
+
+            // Resize handler
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+        };
+
+        initThreeJS();
+
+        // --- UI Logic ---
+
+        // Generate CPU Bars
+        const cpuBarsContainer = document.getElementById('cpu-bars');
+        for(let i=0; i<20; i++) {
+            const bar = document.createElement('div');
+            bar.className = 'w-full bg-indigo-500/50 rounded-t-sm transition-all duration-300';
+            bar.style.height = Math.random() * 100 + '%';
+            cpuBarsContainer.appendChild(bar);
+        }
+
+        // Mock Data Updates
+        setInterval(() => {
+            // Update CPU Bars
+            const bars = cpuBarsContainer.children;
+            let totalHeight = 0;
+            for(let bar of bars) {
+                const h = Math.random() * 100;
+                bar.style.height = h + '%';
+                totalHeight += h;
+            }
+            // Update CPU Text
+            const avg = Math.round(totalHeight / bars.length);
+            document.getElementById('cpu-text').innerText = avg + '%';
+            
+            // Color change based on load
+            if(avg > 80) document.getElementById('cpu-text').classList.replace('text-white', 'text-red-400');
+            else document.getElementById('cpu-text').classList.replace('text-red-400', 'text-white');
+
+        }, 1000);
+
+        // Memory wobble
+        setInterval(() => {
+            const w = 50 + Math.random() * 30;
+            document.getElementById('ram-bar').style.width = w + '%';
+        }, 2000);
+
+        // VM Selection Logic
+        const vms = [
+            { name: "Windows 11 Dev", status: "RUNNING", image: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=2564&auto=format&fit=crop", type: "windows" },
+            { name: "Ubuntu Server", status: "STOPPED", image: "", type: "linux" },
+            { name: "macOS Sequoia", status: "SUSPENDED", image: "https://images.unsplash.com/photo-1519681393784-d120267933ba", type: "mac" }
+        ];
+
+        let currentVMIndex = 0;
+
+        function selectVM(index) {
+            // UI Active State
+            const items = document.querySelectorAll('.sidebar-item');
+            items.forEach(el => el.classList.remove('active'));
+            items[index].classList.add('active');
+
+            // Update Data
+            currentVMIndex = index;
+            const vm = vms[index];
+            
+            document.getElementById('active-vm-name').innerText = vm.name;
+            const statusBadge = document.getElementById('active-vm-status');
+            statusBadge.innerText = vm.status;
+
+            // Style based on status
+            statusBadge.className = "px-2 py-0.5 rounded text-[10px] font-bold border ";
+            const powerBtn = document.getElementById('btn-power');
+            const powerIcon = powerBtn.querySelector('i');
+            const powerText = powerBtn.querySelector('span');
+            const screen = document.getElementById('screen-content');
+
+            if(vm.status === 'RUNNING') {
+                statusBadge.classList.add('bg-green-500/20', 'text-green-400', 'border-green-500/30');
+                powerBtn.classList.replace('text-gray-300', 'text-green-400');
+                powerIcon.classList.replace('ph-play', 'ph-power');
+                powerText.innerText = "Stop";
+                
+                // Show Screen
+                if(vm.image) {
+                    screen.innerHTML = `<img src="${vm.image}" class="w-full h-full object-cover opacity-90" alt="OS">`;
+                }
+                screen.style.opacity = "1";
+            } else if (vm.status === 'STOPPED') {
+                statusBadge.classList.add('bg-red-500/20', 'text-red-400', 'border-red-500/30');
+                powerBtn.classList.replace('text-green-400', 'text-gray-300');
+                powerIcon.classList.replace('ph-power', 'ph-play');
+                powerText.innerText = "Start";
+                screen.style.opacity = "0.1"; // Dim screen
+            } else {
+                statusBadge.classList.add('bg-yellow-500/20', 'text-yellow-400', 'border-yellow-500/30');
+                powerIcon.classList.replace('ph-power', 'ph-play');
+                powerText.innerText = "Resume";
+                screen.style.opacity = "0.5";
+            }
+        }
+
+        function togglePower() {
+            const vm = vms[currentVMIndex];
+            const boot = document.getElementById('boot-screen');
+
+            if(vm.status === 'RUNNING') {
+                // Shut down
+                vm.status = 'STOPPED';
+                selectVM(currentVMIndex);
+                
+                // Update Sidebar dot
+                const dot = document.querySelectorAll('.sidebar-item')[currentVMIndex].querySelector('.status-dot');
+                dot.className = "status-dot stopped w-2 h-2 rounded-full";
+                dot.nextElementSibling.innerHTML = "Stopped • --";
+
+            } else {
+                // Boot up
+                boot.classList.remove('hidden');
+                
+                setTimeout(() => {
+                    boot.classList.add('hidden');
+                    vm.status = 'RUNNING';
+                    selectVM(currentVMIndex);
+
+                    // Update Sidebar dot
+                    const dot = document.querySelectorAll('.sidebar-item')[currentVMIndex].querySelector('.status-dot');
+                    dot.className = "status-dot running w-2 h-2 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.8)]";
+                }, 2000); // 2 second fake boot time
+            }
+        }
+
+    </script>
+</body>
+</html>

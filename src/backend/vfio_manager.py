@@ -6,6 +6,7 @@ import subprocess
 import time
 from pathlib import Path
 from utils.logger import logger
+import os
 
 
 class VFIOManager:
@@ -13,6 +14,35 @@ class VFIOManager:
     
     def __init__(self):
         self._ensure_vfio_loaded()
+    
+    # --- NEW: Static method to provide sudoers content ---
+    @staticmethod
+    def get_sudoers_content() -> str:
+        # Get the current username
+        username = os.getenv("SUDO_USER", os.getenv("USER", "your_user"))
+        
+        # This content is from your setup_sudo_permissions.sh
+        content = f"""# VirtFlow GPU Passthrough - Passwordless sudo for specific operations
+# Created: {time.strftime("%Y-%m-%d")}
+
+# Allow tee for GPU binding (used to write to sysfs)
+{username} ALL=(root) NOPASSWD: /usr/bin/tee
+
+# Allow sh for sysfs writes (more reliable than tee for driver binding)
+{username} ALL=(root) NOPASSWD: /usr/bin/sh
+{username} ALL=(root) NOPASSWD: /bin/sh
+
+# Allow module operations (modprobe paths)
+{username} ALL=(root) NOPASSWD: /usr/sbin/modprobe
+{username} ALL=(root) NOPASSWD: /sbin/modprobe
+
+# Allow pkill for killing GPU processes
+{username} ALL=(root) NOPASSWD: /usr/bin/pkill
+
+# Allow reading dmesg
+{username} ALL=(root) NOPASSWD: /usr/bin/dmesg
+"""
+        return content
     
     def _ensure_vfio_loaded(self):
         """Load VFIO modules"""
