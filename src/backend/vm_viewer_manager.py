@@ -19,6 +19,7 @@ class VMViewerManager:
     
     def __init__(self):
         self.viewer_processes = {}  # vm_name -> subprocess.Popen
+        self.lg_window = None
         self._check_viewer_available()
     
     def _check_viewer_available(self) -> bool:
@@ -227,6 +228,25 @@ class VMViewerManager:
         
         process = self.viewer_processes[vm_name]
         return process.poll() is None
+    
+    def launch_looking_glass_windowed(self, vm_name: str, vm_host: str = "localhost", vm_port: int = 5900) -> bool:
+        """Launch Looking Glass with proper window decorations"""
+        try:
+            from ui.looking_glass_window_v2 import LookingGlassWindowV2
+            
+            self.lg_window = LookingGlassWindowV2(vm_name, vm_host, vm_port)
+            self.lg_window.window_closed.connect(lambda: self._on_lg_window_closed(vm_name))
+            self.lg_window.show()
+            return True
+        except Exception as e:
+            logger.exception(f"Failed to launch Looking Glass: {e}")
+            return False
+    
+    def _on_lg_window_closed(self, vm_name: str):
+        """Handle Looking Glass window closure"""
+        logger.info(f"Looking Glass window closed for {vm_name}")
+        if hasattr(self, 'lg_window'):
+            self.lg_window = None
     
     def _launch_looking_glass(self, vm_name: str, domain: libvirt.virDomain) -> bool:
         """
