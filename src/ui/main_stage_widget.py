@@ -8,9 +8,10 @@ from PySide6.QtWidgets import (
     QTextEdit, QWidget, QProgressBar, QSpacerItem, QSizePolicy
 )
 from PySide6.QtCore import Qt, QSize, QTimer
-from PySide6.QtGui import QPixmap, QIcon, QPainter, QPen, QColor
+from PySide6.QtGui import QPixmap, QIcon, QPainter, QPen, QColor, QBrush
 
 import config
+from ui.widgets.icon_utils import create_recolored_icon
 from models.vm_model import VMModel
 from backend.vm_controller import VMState
 from utils.logger import logger
@@ -79,35 +80,23 @@ class MainStageWidget(QFrame):
         layout.addStretch()
 
         # --- Glass Buttons (Floating style like GG.html) ---
-        self.start_stop_btn = QPushButton(" Stop")  
-        self.start_stop_btn.setObjectName("GlassButton")
+        self.start_stop_btn = QPushButton(" Stop")
+        # --- PHASE 2 (REDUX) TASK 2: Use global QSS ---
+        # self.start_stop_btn.setObjectName("GlassButton") # No longer needed, auto-inherits
+        self.start_stop_btn.setProperty("class", "GlassButton") # Explicitly set class
         # Load power icon
-        power_icon = QIcon(str(config.ICONS_DIR / "power.svg"))
+        power_icon = create_recolored_icon(str(config.ICONS_DIR / "power.svg"), QColor("#e2e8f0"))
         self.start_stop_btn.setIcon(power_icon)
-        self.start_stop_btn.setStyleSheet("""
-            QPushButton#GlassButton {
-                background-color: rgba(255, 255, 255, 0.05);
-                color: #22c55e;
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 8px;
-                padding: 8px 16px;
-                font-weight: 500;
-                font-size: 14px;
-            }
-            QPushButton#GlassButton:hover {
-                background-color: rgba(255, 255, 255, 0.15);
-                border-color: rgba(255, 255, 255, 0.5);
-            }
-        """)
+        # --- All inline QSS removed ---
         
         self.pause_btn = QPushButton()
-        self.pause_btn.setObjectName("GlassButton")
-        self.pause_btn.setIcon(QIcon(str(config.ICONS_DIR / "pause.svg")))
+        self.pause_btn.setProperty("class", "GlassButton")
+        self.pause_btn.setIcon(create_recolored_icon(str(config.ICONS_DIR / "pause.svg"), QColor("#e2e8f0")))
         self.pause_btn.setFixedSize(40, 40)
         
         self.reboot_btn = QPushButton()
-        self.reboot_btn.setObjectName("GlassButton") 
-        self.reboot_btn.setIcon(QIcon(str(config.ICONS_DIR / "arrows-clockwise.svg")))
+        self.reboot_btn.setProperty("class", "GlassButton") 
+        self.reboot_btn.setIcon(create_recolored_icon(str(config.ICONS_DIR / "arrows-clockwise.svg"), QColor("#e2e8f0")))
         self.reboot_btn.setFixedSize(40, 40)
         
         separator = QFrame()
@@ -117,12 +106,14 @@ class MainStageWidget(QFrame):
         separator.setStyleSheet("background-color: rgba(255, 255, 255, 0.2);")
 
         self.snapshot_btn = QPushButton()
-        self.snapshot_btn.setObjectName("GlassButton")
-        self.snapshot_btn.setIcon(QIcon(str(config.ICONS_DIR / "camera.svg")))
+        self.snapshot_btn.setProperty("class", "GlassButton")
+        self.snapshot_btn.setIcon(create_recolored_icon(str(config.ICONS_DIR / "camera.svg"), QColor("#e2e8f0")))
         self.snapshot_btn.setFixedSize(40, 40)
         
-        self.monitor_btn = QPushButton("🖥️")  # Monitor icon (keep emoji as we don't have monitor.svg)
-        self.monitor_btn.setObjectName("GlassButton")
+        self.monitor_btn = QPushButton() # "🖥️"
+        self.monitor_btn.setProperty("class", "GlassButton")
+        # self.monitor_btn.setIcon(QIcon(str(config.ICONS_DIR / "monitor.svg"))) # Assuming we add this icon
+        self.monitor_btn.setIcon(create_recolored_icon(str(config.ICONS_DIR / "monitor.svg"), QColor("#e2e8f0")))
         self.monitor_btn.setFixedSize(40, 40)
 
         layout.addWidget(self.start_stop_btn)
@@ -407,7 +398,7 @@ class MainStageWidget(QFrame):
         painter.setRenderHint(QPainter.Antialiasing)
         
         # Background
-        painter.fillRect(self.cpu_graph.rect(), QColor(0, 0, 0, 50))
+        painter.fillRect(self.cpu_graph.rect(), QColor(0, 0, 0, 0)) # Fully transparent bg
         
         # Draw grid lines
         painter.setPen(QPen(QColor(255, 255, 255, 30), 1))

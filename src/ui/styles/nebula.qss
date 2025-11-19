@@ -1,283 +1,354 @@
 /*
- * ==========================================
- * NEBULA UI STYLESHEET (for VirtFlow)
- * ==========================================
- * Exact replica of GG.html design in QSS
+ * Nebula QSS Stylesheet
+ *
+ * PHASE 2 (REDUX) OVERHAUL:
+ * - Added new styles for QMenu (right-click) to achieve a "glass" look.
+ * - Improved styles for QAbstractScrollArea (scrollbars).
+ * - Enhanced .GlassButton and .PrimaryButton for better aesthetics.
  */
 
-/* === Global Styles === */
+/* --- Fonts (Loaded in main.py) --- */
 * {
-    font-family: "Inter", sans-serif;
-    color: #e2e8f0;
+    font-family: "Inter";
+    color: #e2e8f0; /* slate-200 */
     font-size: 14px;
-    outline: none;
 }
 
-QWidget {
+/* --- Main Window & Glass Panel --- */
+QMainWindow#MainWindow {
     background: transparent;
 }
-
-/* === Main Window ===
- * This will be our frameless QMainWindow
- */
-#MainWindow {
-    background-color: #0f172a; /* slate-900 */
+QFrame#GlassPanel {
+    background-color: #0f172a90; /* slate-900 with 90% alpha */
+    /* background-color: #020617; */ /* black */
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
 }
 
-/* === Custom TitleBar === */
+/* * --- PHASE 2 (REDUX) - TASK 4: Glass Context Menus --- 
+ * This removes the "Windows 98" look.
+ */
+QMenu {
+    background-color: rgba(30, 41, 59, 0.95); /* slate-800 95% alpha */
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 8px; /* p-2 */
+    color: #e2e8f0; /* slate-200 */
+}
+QMenu::item {
+    font-size: 14px;
+    color: #e2e8f0;
+    padding: 8px 12px; /* p-2 px-3 */
+    border-radius: 8px; /* rounded-lg */
+    margin: 0 4px; /* mx-1 */
+}
+QMenu::item:selected {
+    background-color: #3b82f6; /* blue-600 */
+    color: #ffffff;
+}
+QMenu::item:disabled {
+    color: #64748b; /* slate-500 */
+    background: transparent;
+}
+QMenu::separator {
+    height: 1px;
+    background-color: rgba(255, 255, 255, 0.1);
+    margin: 8px 4px;
+}
+/* --- END TASK 4 --- */
+
+
+/* --- Title Bar --- */
 QFrame#TitleBar {
     background-color: transparent;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1); /* glass-border equivalent */
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
-
 QLabel#TitleBarLogo {
-    font-size: 10pt;
-    font-weight: 600;
-    color: #e2e8f0;
+    font-size: 16px;
+    font-weight: 800;
+    color: #ffffff;
 }
 QLabel#TitleBarSubtitle {
-    color: #94a3b8; /* slate-400 */
+    font-size: 16px;
     font-weight: 300;
-    font-size: 9pt;
+    color: #94a3b8; /* slate-400 */
 }
-
-/* === Global Search Bar === */
 QLineEdit#GlobalSearch {
-    background-color: rgba(255, 255, 255, 0.05);
+    background-color: rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    padding: 6px 12px 6px 32px; /* Left padding for icon */
-    color: white;
+    border-radius: 10px;
+    padding: 8px 12px 8px 32px; /* Left padding for icon */
+    color: #e2e8f0;
+    font-size: 13px;
 }
 QLineEdit#GlobalSearch:focus {
-    background-color: rgba(255, 255, 255, 0.1);
-    border: 1px solid rgba(99, 102, 241, 0.5); /* indigo-400 */
+    border-color: #3b82f6; /* blue-600 */
 }
 
-/* === Sidebar (Replaces VMListWidget) === */
+
+/* --- Sidebar --- */
 QFrame#Sidebar {
-    background-color: rgba(0, 0, 0, 0.1);
+    background-color: transparent;
     border-right: 1px solid rgba(255, 255, 255, 0.1);
 }
-
 QLabel#SidebarTitle {
-    font-size: 9pt;
+    font-size: 11px;
     font-weight: 700;
     color: #94a3b8; /* slate-400 */
-    text-transform: uppercase;
-    padding: 0 4px;
+    letter-spacing: 0.1em;
+    padding-left: 8px;
 }
-
 QListWidget#VMList {
     background-color: transparent;
     border: none;
-    outline: 0;
+    outline: none;
 }
-
-/* This is the custom item from GG.html */
-QListWidget::item {
+QListWidget#VMList::item {
     background-color: transparent;
-    border-radius: 8px;
-    padding: 0px;
-    margin: 2px 0;
+    border-radius: 10px;
 }
-QListWidget::item:hover {
-    background-color: rgba(255, 255, 255, 0.05);
-}
-/* GG.html 'active' class */
-QListWidget::item:selected {
-    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                      stop:0 rgba(99, 102, 241, 0.2), /* indigo-500 */
-                                      stop:1 transparent);
-    border: none;
-    outline: 0;
-    border-left: 3px solid #6366f1; /* indigo-500 */
+QListWidget#VMList::item:selected {
+    background-color: #334155; /* slate-700 */
 }
 
-/* === The "Real" Glass Panel Effect ===
- * This is the style from .glass-panel in GG.html
- * We will apply this to frames in the MainStage.
- */
-QFrame#GlassPanel {
-    background: qlineargradient(spread:pad, x1:0, y1:0, x2:1, y2:1,
-                                stop:0 rgba(255, 255, 255, 0.03),
-                                stop:1 rgba(255, 255, 255, 0.01));
-    border-radius: 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.4);
-    border-left: 1px solid rgba(255, 255, 255, 0.3);
-    border-right: 1px solid rgba(255, 255, 255, 0.2);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-    /* QSS doesn't support box-shadow, the borders and gradient give the effect */
+
+/* --- VM List Item Widget --- */
+QFrame#VMListItem {
+    background-color: transparent;
+    border-radius: 10px;
+    padding: 8px;
+}
+QLabel#VMName {
+    font-size: 15px;
+    font-weight: 600;
+    color: #ffffff;
+}
+QLabel#VMState {
+    font-size: 12px;
+}
+QLabel#VMState[status="running"] {
+    color: #4ade80; /* green-400 */
+}
+QLabel#VMState[status="shut_off"] {
+    color: #94a3b8; /* slate-400 */
+}
+QLabel#VMState[status="paused"] {
+    color: #facc15; /* yellow-400 */
+}
+QLabel#VMState[status="other"] {
+    color: #f87171; /* red-400 */
 }
 
-/* === Main Stage Widgets === */
+/* --- Main Stage --- */
+QFrame#MainStage {
+    background-color: transparent;
+}
+
+/* Toolbar */
 QFrame#VMToolbar {
-    background-color: rgba(255, 255, 255, 0.05);
+    background-color: transparent;
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
-
 QLabel#ActiveVMName {
-    font-size: 16pt;
-    font-weight: 600;
-}
-
-/* Status Badge */
-QLabel#ActiveVMStatus {
-    font-size: 7pt;
+    font-size: 20px;
     font-weight: 700;
-    padding: 3px 6px;
-    border-radius: 4px;
+    color: #ffffff;
+}
+QLabel#ActiveVMStatus {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding: 4px 8px;
+    border-radius: 6px;
+    color: #000000;
+    max-height: 18px; /* 10px font + 8px padding */
 }
 QLabel#ActiveVMStatus[status="running"] {
-    background-color: rgba(34, 197, 94, 0.2);
-    color: #22c55e; /* green-500 */
-    border: 1px solid rgba(34, 197, 94, 0.3);
+    background-color: #4ade80; /* green-400 */
+    color: #020617;
 }
-QLabel#ActiveVMStatus[status="stopped"] {
-    background-color: rgba(239, 68, 68, 0.2);
-    color: #ef4444; /* red-500 */
-    border: 1px solid rgba(239, 68, 68, 0.3);
+QLabel#ActiveVMStatus[status="shut_off"] {
+    background-color: #64748b; /* slate-500 */
+    color: #ffffff;
 }
 QLabel#ActiveVMStatus[status="paused"] {
-    background-color: rgba(234, 179, 8, 0.2);
-    color: #eab308; /* yellow-500 */
-    border: 1px solid rgba(234, 179, 8, 0.3);
+    background-color: #facc15; /* yellow-400 */
+    color: #020617;
+}
+QLabel#ActiveVMStatus[status="stopped"] {
+    background-color: #64748b; /* slate-500 */
+    color: #ffffff;
 }
 
-/* Glass Buttons (from .glass-btn) */
-QPushButton#GlassButton {
+/* * --- PHASE 2 (REDUX) - TASK 2: Enhanced Glass Buttons ---
+ * Replaces old style from main_stage_widget.py
+ */
+QPushButton.GlassButton {
     background-color: rgba(255, 255, 255, 0.05);
-    color: #e2e8f0;
+    color: #e2e8f0; /* slate-200 */
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 8px;
-    padding: 8px 10px;
+    padding: 8px 16px;
     font-weight: 500;
+    font-size: 14px;
+    min-width: 24px;
+    min-height: 24px;
 }
-QPushButton#GlassButton:hover {
+QPushButton.GlassButton:hover {
     background-color: rgba(255, 255, 255, 0.15);
-    border-color: rgba(255, 255, 255, 0.5);
+    border-color: rgba(255, 255, 255, 0.2);
 }
-QPushButton#GlassButton:pressed {
-    background-color: rgba(255, 255, 255, 0.03);
+QPushButton.GlassButton:pressed {
+    background-color: rgba(0, 0, 0, 0.1);
 }
-QPushButton#GlassButton:disabled {
-    color: #64748b; /* slate-500 */
+QPushButton.GlassButton:disabled {
     background-color: rgba(255, 255, 255, 0.02);
+    color: #64748b; /* slate-500 */
     border-color: rgba(255, 255, 255, 0.05);
 }
 
-/* Special Button Colors */
-QPushButton#PowerButton[status="running"] { color: #22c55e; } /* green */
-QPushButton#PowerButton[status="stopped"] { color: #e2e8f0; } /* default */
-QPushButton#PauseButton { color: #eab308; } /* yellow */
-QPushButton#RebootButton { color: #3b82f6; } /* blue */
+/* Special state for Start/Stop button */
+QPushButton.GlassButton[status="running"] {
+    color: #f87171; /* red-400 */
+}
+QPushButton.GlassButton[status="running"]:hover {
+    background-color: rgba(220, 38, 38, 0.2); /* red-600 */
+    border-color: rgba(220, 38, 38, 0.5);
+}
+QPushButton.GlassButton[status="stopped"] {
+    color: #4ade80; /* green-400 */
+}
+QPushButton.GlassButton[status="stopped"]:hover {
+    background-color: rgba(74, 222, 128, 0.2); /* green-400 */
+    border-color: rgba(74, 222, 128, 0.5);
+}
+/* --- END TASK 2 --- */
 
-QPushButton#NewVMButton {
-    background-color: transparent;
-    border: 1px solid rgba(99, 102, 241, 0.5); /* indigo-500 */
-    color: #a78bfa; /* violet-400 */
-    font-weight: 500;
-    padding: 10px;
+
+/* Stats Panel */
+QFrame#StatsPanel {
+    background-color: transparent; /* slate-900 */
+}
+QFrame.GlassPanel {
+    background-color: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.05);
     border-radius: 12px;
 }
-QPushButton#NewVMButton:hover {
-    color: #FFFFFF;
-    background-color: rgba(99, 102, 241, 0.2);
-    border-color: #6366f1;
-}
-
-/* === Stats Panel === */
-QLabel#StatsTitle {
-    font-size: 9pt;
+QLabel.StatsTitle {
+    font-size: 11px;
     font-weight: 700;
     color: #94a3b8; /* slate-400 */
     text-transform: uppercase;
 }
-QLabel#StatsBigText {
-    font-size: 24pt;
-    font-weight: 300;
-    color: #FFFFFF;
+QLabel.StatsBigText {
+    font-size: 28px;
+    font-weight: 600;
+    color: #ffffff;
 }
-QLabel#StatsSubText {
-    font-size: 9pt;
+QLabel.StatsSubText {
+    font-size: 12px;
     color: #94a3b8;
 }
 
-QProgressBar {
+QProgressBar#RAMBar {
     background-color: rgba(255, 255, 255, 0.1);
     border: none;
     border-radius: 4px;
-    text-align: center;
-    color: transparent;
-}
-QProgressBar::chunk {
-    border-radius: 4px;
+    height: 8px;
 }
 QProgressBar#RAMBar::chunk {
-    background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                                      stop:0 #6366f1, stop:1 #a855f7); /* indigo to purple */
-}
-QProgressBar#DiskBar::chunk {
-    background-color: #06b6d4; /* cyan-500 */
+    background-color: #6366f1; /* indigo-500 */
+    border-radius: 4px;
 }
 
-/* === Console/Log Panel === */
+/* Console */
+QTextEdit#ConsoleLog {
+    background-color: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #cbd5e1; /* slate-300 */
+    font-family: "JetBrains Mono";
+    font-size: 12px;
+}
 QTabWidget::pane {
     border: none;
-    border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
-QTabWidget QTabBar::tab {
+QTabBar::tab {
     background: transparent;
+    color: #94a3b8;
+    padding: 8px 16px;
     border: none;
-    color: #94a3b8; /* slate-400 */
-    font-size: 9pt;
-    font-weight: 500;
-    padding: 8px 12px;
+    border-bottom: 2px solid transparent;
 }
-QTabWidget QTabBar::tab:selected {
-    color: #FFFFFF;
+QTabBar::tab:selected {
+    color: #ffffff;
+    border-bottom: 2px solid #3b82f6; /* blue-600 */
+}
+QTabBar::tab:hover {
     background-color: rgba(255, 255, 255, 0.05);
-    border-bottom: 2px solid #6366f1; /* indigo-500 */
 }
 
-QTextEdit#ConsoleLog {
-    background-color: #0c0c0c;
-    color: #22c55e; /* green-500 */
-    font-family: "JetBrains Mono", "Courier";
-    font-size: 9pt;
+/* * --- PHASE 2 (REDUX) - TASK 3: Scrollbars --- 
+ */
+QAbstractScrollArea {
+    background-color: transparent;
     border: none;
-    padding: 8px;
 }
-
-/* === Scrollbars === */
 QScrollBar:vertical {
     background: transparent;
-    width: 6px;
+    width: 8px;
     margin: 0;
 }
 QScrollBar::handle:vertical {
     background: rgba(255, 255, 255, 0.2);
-    border-radius: 3px;
     min-height: 20px;
+    border-radius: 4px;
 }
 QScrollBar::handle:vertical:hover {
-    background: rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.3);
 }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
     background: none;
     height: 0;
-    width: 0;
+}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: none;
+}
+/* --- END TASK 3 --- */
+
+
+/* --- Global Buttons --- */
+QPushButton#NewVMButton {
+    background-color: #3b82f6; /* blue-600 */
+    color: #ffffff;
+    font-weight: 600;
+    font-size: 14px;
+    border: none;
+    border-radius: 8px;
+    padding: 12px;
+}
+QPushButton#NewVMButton:hover {
+    background-color: #2563eb; /* blue-700 */
 }
 
-/* === System Stats Widget === */
-QFrame#SystemStats {
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
-    margin: 8px 0;
+/* --- PHASE 2 (REDUX) - TASK 2: Primary Button --- */
+/* (For HyperGlass dialog) */
+QPushButton.PrimaryButton {
+    background-color: #3b82f6; /* blue-600 */
+    color: #ffffff;
+    font-weight: 600;
+    font-size: 14px;
+    border: 1px solid rgba(59, 130, 246, 0.3);
+    border-radius: 8px;
+    padding: 8px 16px;
+    min-width: 24px;
+    min-height: 24px;
 }
-
-/* === Animated Background === */
-QWidget#AnimatedBackground {
-    background: #0f172a;
+QPushButton.PrimaryButton:hover {
+    background-color: #2563eb; /* blue-700 */
+}
+QPushButton.PrimaryButton:disabled {
+    background-color: #334155; /* slate-700 */
+    color: #64748b; /* slate-500 */
+    border-color: rgba(255, 255, 255, 0.1);
 }

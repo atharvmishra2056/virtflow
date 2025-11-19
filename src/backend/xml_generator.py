@@ -1,8 +1,12 @@
 """
 libvirt XML Generator for Windows VMs with GPU Passthrough
 PRODUCTION-READY - Fixed for Ubuntu 25.10 OVMF paths
+
 PHASE 0 REFACTOR: This module is now the single source of truth for all
 VM XML generation, merging logic from the deprecated vm_gpu_configurator.py.
+
+PHASE 2.C REFACTOR: Added support for settings from HyperGlass dialog
+(VRAM, 3D Accel, TPM).
 """
 
 import uuid
@@ -33,7 +37,11 @@ class XMLGenerator:
 
     def _find_ovmf_code_path(self) -> Optional[str]:
         """Find OVMF CODE firmware path on system"""
-        possible_paths =
+        possible_paths = [
+            "/usr/share/OVMF/OVMF_CODE.fd",
+            "/usr/share/qemu/OVMF_CODE.fd",
+            "/usr/share/ovmf/OVMF_CODE.fd"
+        ]
         
         for path in possible_paths:
             if Path(path).exists():
@@ -66,7 +74,11 @@ class XMLGenerator:
 
     def _find_ovmf_vars_path(self) -> Optional[str]:
         """Find OVMF VARS template firmware path on system"""
-        possible_paths =
+        possible_paths = [
+            "/usr/share/OVMF/OVMF_VARS.fd",
+            "/usr/share/qemu/OVMF_VARS.fd",
+            "/usr/share/ovmf/OVMF_VARS.fd"
+        ]
         
         for path in possible_paths:
             if Path(path).exists():
@@ -212,6 +224,12 @@ class XMLGenerator:
               <controller type='pci' index='6' model='pcie-root-port'>
                 <address type='pci' domain='0x0000' bus='0x00' slot='0x07' function='0x0'/>
               </controller>
+              <controller type='pci' index='7' model='pcie-root-port'>
+                <address type='pci' domain='0x0000' bus='0x00' slot='0x08' function='0x0'/>
+              </controller>
+              <controller type='pci' index='8' model='pcie-root-port'>
+                <address type='pci' domain='0x0000' bus='0x00' slot='0x09' function='0x0'/>
+              </controller>
               <controller type='virtio-serial' index='0'>
                 <address type='pci' domain='0x0000' bus='0x02' slot='0x00' function='0x0'/>
               </controller>
@@ -261,13 +279,15 @@ class XMLGenerator:
         """
 
     # --- PHASE 0 REFACTOR (Task 0.3) ---
-    def _generate_qxl_graphics(self, is_primary: bool = True) -> str:
+    # --- PHASE 2.C MOD: Added vram_mb ---
+    def _generate_qxl_graphics(self, is_primary: bool = True, vram_mb: int = 64) -> str:
         """
         Generate SPICE/QXL graphics.
         This is ALWAYS included for SPICE input, but only 'primary' if
         GPU passthrough is not enabled.
         """
         primary_attr = " primary='yes'" if is_primary else ""
+        vram_kb = vram_mb * 1024 # Convert MB to KB for libvirt
         
         return f"""
               <graphics type='spice' autoport='yes'>
@@ -276,7 +296,7 @@ class XMLGenerator:
               </graphics>
               <audio id='1' type='spice'/>
               <video>
-                <model type='qxl' ram='65536' vram='65536' vgamem='16384' heads='1'{primary_attr}/>
+                <model type='qxl' ram='{vram_kb}' vram='{vram_kb}' vgamem='16384' heads='1'{primary_attr}/>
                 <address type='pci' domain='0x0000' bus='0x00' slot='0x01' function='0x0'/>
               </video>
         """
@@ -320,7 +340,6 @@ class XMLGenerator:
     def _generate_looking_glass_shmem(self) -> str:
         """
         Generates the IVSHMEM device required for Looking Glass.
-        
         """
         return """
               <shmem name='looking-glass'>
@@ -330,6 +349,25 @@ class XMLGenerator:
               </shmem>
         """
     # --- END REFACTOR ---
+
+    # --- PHASE 2.C REFACTOR: New method for 3D Accel ---
+    def _generate_virtio_gpu(self, vram_mb: int = 64, accel_3d: bool = False) -> str:
+        """
+        Generates a VirtIO-VGA adapter, optionally with 3D acceleration.
+        This is separate from the QXL/SPICE device.
+        """
+        vram_kb = vram_mb * 1024
+        accel_str = "<acceleration accel3d='yes'/>" if accel_3d else ""
+        
+        return f"""
+              <video>
+                <model type='virtio' vram='{vram_kb}' heads='1'>
+                  {accel_str}
+                </model>
+                <address type='pci' domain='0x0000' bus='0x09' slot='0x00' function='0x0'/>
+              </video>
+        """
+    # --- END PHASE 2.C ---
 
     def _generate_console(self) -> str:
         """Generate console, serial, and QEMU agent channels"""
@@ -386,6 +424,7 @@ class XMLGenerator:
             </devices>
         """
 
+    # --- PHASE 2.C MOD: Added settings dict ---
     def generate_windows_vm_xml(
         self,
         vm_name: str,
@@ -396,12 +435,16 @@ class XMLGenerator:
         virtio_iso_path: str,
         enable_gpu_passthrough: bool = False,
         gpu: Optional[GPU] = None,
-        enable_tpm: bool = True,
-        display_preference: str = "spice"  # <-- PHASE 0 REFACTOR (Task 0.2)
+        enable_tpm: bool = True, # Retain for default
+        display_preference: str = "spice",
+        settings: Optional[Dict[str, str]] = None
     ) -> str:
         """
         Generate the complete libvirt XML for a new Windows VM.
         """
+        if settings is None:
+            settings = {}
+            
         if not self.ovmf_code_path or not self.ovmf_vars_path:
             raise FileNotFoundError("OVMF firmware (CODE or VARS) not found. Cannot generate VM.")
 
@@ -411,16 +454,42 @@ class XMLGenerator:
         if not nvram_path:
             raise RuntimeError(f"Failed to prepare NVRAM file for {vm_name}")
         
-        xml_parts =
+        xml_parts = [
+            f"<domain type='kvm'>",
+            f"  <name>{vm_name}</name>",
+            f"  <uuid>{vm_uuid}</uuid>",
+            f"  <memory unit='MiB'>{memory_mb}</memory>",
+            f"  <currentMemory unit='MiB'>{memory_mb}</currentMemory>",
+            f"  <vcpu placement='static'>{vcpus}</vcpu>",
+            "    <cpu mode='host-passthrough' check='partial'>",
+            f"      <topology sockets='{topology['sockets']}' cores='{topology['cores']}' threads='{topology['threads']}'/>",
+            "    </cpu>",
+            self._generate_os_config(vm_name, nvram_path),
+            self._generate_features(),
+            self._generate_clock_config(),
+            self._generate_power_management(),
+            self._generate_devices_header(),
+            self._generate_disk_config(disk_path),
+            self._generate_cdrom_config(iso_path, virtio_iso_path),
+            self._generate_network_config(),
+        ]
 
         # --- PHASE 0 REFACTOR (Task 0.3) ---
         # Always include SPICE/QXL.
-        # SPICE is required for Looking Glass input  or basic install.
+        # SPICE is required for Looking Glass input or basic install.
         # It's only 'primary' if GPU passthrough is OFF.
         is_primary_display = not enable_gpu_passthrough
+        # --- PHASE 2.C MOD: Read VRAM for QXL ---
+        vram = int(settings.get("vram", "128"))
         xml_parts.append("    ")
-        xml_parts.append(self._generate_qxl_graphics(is_primary=is_primary_display))
+        xml_parts.append(self._generate_qxl_graphics(is_primary=is_primary_display, vram_mb=vram))
         # --- END REFACTOR ---
+
+        # --- PHASE 2.C MOD: Add VirtIO GPU if 3D Accel is on ---
+        if settings.get("3d_accel", "false").lower() == "true":
+            xml_parts.append("    ")
+            xml_parts.append(self._generate_virtio_gpu(vram_mb=vram, accel_3d=True))
+        # --- END MOD ---
 
         if enable_gpu_passthrough and gpu:
             xml_parts.append("    ")
@@ -442,8 +511,11 @@ class XMLGenerator:
             self._generate_input_devices(),
         ])
 
-        if enable_tpm:
+        # --- PHASE 2.C MOD: Check setting OR param for TPM ---
+        tpm_enabled_setting = settings.get("tpm_enabled", "false").lower() == "true"
+        if enable_tpm or tpm_enabled_setting:
             xml_parts.append(self._generate_tpm_device())
+        # --- END MOD ---
             
         xml_parts.extend([
             self._generate_other_devices(),

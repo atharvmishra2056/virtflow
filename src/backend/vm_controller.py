@@ -115,6 +115,66 @@ class VMController:
         except libvirt.libvirtError as e:
             logger.error(f"Failed to get VM info: {e}")
             return {}
+
+    # --- TASKS 2.C: New method to apply settings on-the-fly ---
+    def _apply_performance_settings(self, domain: libvirt.virDomain):
+        """Applies SPICE, CPU, and Memory settings just before launch."""
+        try:
+            # Get ALL settings, including metadata
+            settings = self.manager.get_all_vm_settings(domain)
+            if not settings:
+                logger.debug("No custom settings found, skipping runtime XML changes.")
+                return
+
+            xml_str = domain.XMLDesc(0)
+            root = ET.fromstring(xml_str)
+            modified = False
+
+            # --- SPICE OpenGL (from metadata) ---
+            spice_gl = settings.get("spice_opengl", "false").lower() == "true"
+            graphics_node = root.find(".//graphics[@type='spice']")
+            if graphics_node is not None:
+                gl_node = graphics_node.find('gl')
+                
+                if spice_gl: # "Fast (OpenGL)"
+                    if gl_node is None:
+                        ET.SubElement(graphics_node, 'gl', {'enable': 'yes'})
+                        modified = True
+                        logger.info(f"Applying SPICE OpenGL for {domain.name()}")
+                else: # "Smooth (QXL)"
+                    if gl_node is not None:
+                        graphics_node.remove(gl_node)
+                        modified = True
+                        logger.info(f"Removing SPICE OpenGL for {domain.name()}")
+            
+            # --- HugePages (from metadata) ---
+            if settings.get("hugepages", "false").lower() == "true":
+                if root.find("memoryBacking") is None:
+                    mem_backing = ET.SubElement(root, "memoryBacking")
+                    ET.SubElement(mem_backing, "hugepages")
+                    modified = True
+                    logger.info(f"Applying HugePages for {domain.name()}")
+            
+            # --- CPU Pinning (from metadata) ---
+            if settings.get("cpu_pinning", "false").lower() == "true":
+                if root.find("cputune") is None:
+                    # NOTE: A real implementation requires topology.
+                    # This is a placeholder as per the plan to add the tag.
+                    ET.SubElement(root, "cputune")
+                    # TODO: Add <vcpupin ...> elements
+                    modified = True
+                    logger.info(f"Applying CPU Pinning for {domain.name()}")
+
+            # If we modified the XML, redefine the domain (transiently)
+            if modified:
+                new_xml = ET.tostring(root, encoding="unicode")
+                # Use defineXML to apply transient changes
+                self.manager.connection.defineXML(new_xml)
+                logger.info(f"Successfully applied runtime settings for {domain.name()}")
+
+        except Exception as e:
+            logger.error(f"Failed to apply performance settings: {e}")
+            # Do not block VM start, just log the error
     
     def start_vm(self, domain: libvirt.virDomain) -> bool:
         """
@@ -163,6 +223,9 @@ class VMController:
                     else:
                         logger.info("GPU already bound to VFIO")
             
+            # --- TASKS 2.C: Apply settings before launch ---
+            self._apply_performance_settings(domain)
+
             domain.create()
             logger.info(f"VM '{domain.name()}' started successfully")
             return True

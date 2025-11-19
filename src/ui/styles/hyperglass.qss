@@ -1,0 +1,208 @@
+/*
+ * HyperGlass QSS Stylesheet (Phase 2 Redux)
+ * High-fidelity translation of xyz.html
+ */
+
+/* --- The Main "Glass" Window --- */
+QDialog#HyperGlassDialog {
+    background: transparent;
+}
+
+QFrame#HyperGlassFrame {
+    /* .hyper-glass */
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop: 0 rgba(255, 255, 255, 0.05), stop: 1 rgba(255, 255, 255, 0.01));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-top-color: rgba(255, 255, 255, 0.2);
+    border-left-color: rgba(255, 255, 255, 0.2);
+    border-radius: 24px; /* from .rounded-3xl */
+    
+    /* * NOTE: backdrop-filter: blur(20px) is set in Python via:
+     * self.setAttribute(Qt.WA_TranslucentBackground)
+     * self.graphicsEffect().setBlurRadius(20)
+     */
+}
+
+/* --- Custom Title Bar (inside dialog) --- */
+QFrame#SettingsTitleBar {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    height: 64px;
+}
+
+QLabel#VmNameLabel {
+    color: white;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+QLabel#VmStatusLabel {
+    font-size: 12px;
+}
+
+QLabel#VmStatusLabel[status="running"] {
+    color: #4ade80; /* green-400 */
+}
+QLabel#VmStatusLabel[status="stopped"] {
+    color: #f87171; /* red-400 */
+}
+
+/* --- Sidebar Navigation --- */
+QFrame#SettingsSidebar {
+    background: transparent;
+    border-right: 1px solid rgba(255, 255, 255, 0.1);
+    width: 256px; /* w-64 */
+}
+
+QLabel.SidebarHeader {
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    padding-left: 12px;
+    margin-bottom: 4px;
+    margin-top: 12px;
+}
+
+/* .nav-item */
+QPushButton.SidebarButton {
+    background: transparent;
+    color: rgba(255, 255, 255, 0.8);
+    border: 1px solid transparent;
+    border-radius: 12px;
+    padding: 12px;
+    font-size: 14px;
+    font-weight: 500;
+    text-align: left;
+    icon-size: 20px;
+}
+QPushButton.SidebarButton:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+QPushButton.SidebarButton:checked {
+    /* .nav-item.active */
+    background: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0, stop: 0 rgba(255, 255, 255, 0.1), stop: 1 rgba(255, 255, 255, 0.02));
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: #ffffff; /* Icon color is set in Python */
+}
+
+/* --- Content Panels --- */
+QFrame.SettingsPanel {
+    background: transparent;
+}
+QLabel.PanelTitle {
+    color: white;
+    font-size: 24px;
+    font-weight: 300;
+}
+QLabel.PanelSubtitle {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 14px;
+    margin-bottom: 16px;
+}
+
+/* .glass-card */
+QFrame.GlassCard {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 16px;
+    padding: 20px;
+}
+
+QLabel.CardTitle {
+    color: white;
+    font-size: 14px;
+    font-weight: 500;
+}
+QLabel.CardSubtitle {
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 12px;
+}
+
+/* --- Custom Widgets (from xyz.html) --- */
+
+/* .glass-input (QLineEdit) */
+QLineEdit.GlassInput {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: white;
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    /* box-shadow: inset 0 2px 4px rgba(0,0,0,0.2); */ /* REMOVED - Not supported in QSS */
+}
+QLineEdit.GlassInput:focus {
+    border-color: rgba(96, 165, 250, 0.5);
+    background: rgba(0, 0, 0, 0.3);
+}
+QLineEdit.GlassInput:read-only {
+    color: rgba(255, 255, 255, 0.5);
+}
+
+/* .glass-input (QFrame) - This is for our custom GlassSelect */
+QFrame.GlassInput {
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: white;
+    border-radius: 8px;
+    font-size: 14px;
+    /* box-shadow: inset 0 2px 4px rgba(0,0,0,0.2); */ /* REMOVED - Not supported in QSS */
+}
+QFrame.GlassInput:focus-within {
+     border-color: rgba(96, 165, 250, 0.5);
+    background: rgba(0, 0, 0, 0.3);
+}
+
+/* --- FIX: Point 4 - New Toggle Style --- */
+QCheckBox.GlassToggle::indicator {
+    width: 48px;
+    height: 28px;
+    border-radius: 14px;
+}
+QCheckBox.GlassToggle::indicator:unchecked {
+    background: rgba(255, 255, 255, 0.2); /* Off state: visible gray */
+}
+QCheckBox.GlassToggle::indicator:unchecked:hover {
+    background: rgba(255, 255, 255, 0.3);
+}
+QCheckBox.GlassToggle::indicator:checked {
+    background: #3b82f6; /* On state: solid blue */
+}
+QCheckBox.GlassToggle::indicator:checked:hover {
+    background: #2563eb; /* Darker blue */
+}
+QCheckBox.GlassToggle::indicator::handle {
+    background: white;
+    border-radius: 11px;
+    width: 22px;
+    height: 22px;
+    subcontrol-position: center left;
+    subcontrol-origin: content;
+    /* Animation must be done in Python (see IOSSwitch) */
+    /* This is a non-animated fallback */
+}
+QCheckBox.GlassToggle::indicator:unchecked::handle {
+    left: 2px;
+}
+QCheckBox.GlassToggle::indicator:checked::handle {
+    left: 22px;
+}
+/* --- END FIX --- */
+
+
+
+/* input[type=range] (QSlider) */
+QSlider.GlassSlider::groove:horizontal {
+    background: rgba(255,255,255,0.2);
+    height: 4px;
+    border-radius: 2px;
+}
+QSlider.GlassSlider::handle:horizontal {
+    background: white;
+    border: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 10px;
+    margin: -8px 0; /* (height - groove) / 2 */
+}
+QSlider.GlassSlider::handle:horizontal:hover {
+    background: #f0f0f0;
+}

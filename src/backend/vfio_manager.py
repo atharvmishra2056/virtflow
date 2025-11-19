@@ -62,21 +62,85 @@ class VFIOManager:
         except Exception as e:
             logger.debug(f"sysfs_write exception: {e}")
             return False
+
+    # --- TASK 1.2: Logic Merged from gpu_worker.py ---
+    def _remove_nvidia_driver(self):
+        """Remove NVIDIA driver modules to free GPU"""
+        try:
+            logger.info("Removing NVIDIA driver modules...")
+            
+            # Stop any processes using NVIDIA
+            subprocess.run(['sudo', 'pkill', '-9', '-f', 'nvidia'], timeout=10, capture_output=True)
+            time.sleep(0.5)
+            
+            # Remove audio driver first (snd_hda_intel)
+            logger.info("Removing audio driver...")
+            subprocess.run(['sudo', 'modprobe', '-r', 'snd_hda_intel'], timeout=10, capture_output=True)
+            time.sleep(0.3)
+            
+            # Remove modules in reverse dependency order
+            nvidia_modules = [
+                'nvidia_uvm',
+                'nvidia_drm', 
+                'nvidia_modeset',
+                'nvidia'
+            ]
+            
+            for module in nvidia_modules:
+                try:
+                    result = subprocess.run(
+                        ['sudo', 'modprobe', '-r', module],
+                        timeout=10,
+                        capture_output=True
+                    )
+                    if result.returncode == 0:
+                        logger.info(f"Removed {module}")
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"Timeout removing {module}")
+                except Exception:
+                    pass
+            
+            time.sleep(1)
+            logger.info("NVIDIA driver removed")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"Warning: Could not fully remove NVIDIA driver: {e}")
+            return True  # Continue anyway
+            
+    def _load_nvidia_driver(self):
+        """Reload NVIDIA driver modules"""
+        try:
+            logger.info("Loading NVIDIA driver...")
+            subprocess.run(['sudo', 'modprobe', 'nvidia'], check=False, timeout=5)
+            subprocess.run(['sudo', 'modprobe', 'nvidia_modeset'], check=False, timeout=5)
+            subprocess.run(['sudo', 'modprobe', 'nvidia_drm'], check=False, timeout=5)
+            subprocess.run(['sudo', 'modprobe', 'nvidia_uvm'], check=False, timeout=5)
+            
+            # Reload audio driver
+            logger.info("Loading audio driver...")
+            subprocess.run(['sudo', 'modprobe', 'snd_hda_intel'], check=False, timeout=5)
+            
+            time.sleep(1) # Give modules time to settle
+            
+            logger.info("NVIDIA driver loaded")
+            return True
+        except Exception as e:
+            logger.warning(f"Warning: Could not reload NVIDIA driver: {e}")
+            return False
+    # --- END TASK 1.2 MERGE ---
     
     def bind_gpu_to_vfio(self, gpu) -> bool:
         """
-        Bind GPU to VFIO (NVIDIA never loaded, so nothing to kill!)
+        Bind GPU to VFIO
         """
         logger.info(f"Binding {gpu.full_name} to VFIO...")
         
         try:
-            # Remove audio driver if bound (for audio device)
-            logger.info("Removing audio driver...")
-            subprocess.run(['sudo', 'modprobe', '-r', 'snd_hda_intel'], capture_output=True, timeout=5)
-            time.sleep(0.5)
-            
-            # Since NVIDIA isn't loaded, GPU is free!
-            # Just bind to VFIO directly
+            # --- TASK 1.2 MODIFICATION ---
+            # Call internal method to remove NVIDIA driver first
+            self._remove_nvidia_driver()
+            # --- END MODIFICATION ---
             
             for device in gpu.all_devices:
                 logger.info(f"Binding {device.address} to vfio-pci...")
@@ -151,16 +215,11 @@ class VFIOManager:
                 override = f"/sys/bus/pci/devices/{device.address}/driver_override"
                 self._sysfs_write(override, "")
             
+            # --- TASK 1.2 MODIFICATION ---
             # NOW load NVIDIA modules for host use
             logger.info("Loading NVIDIA modules for host...")
-            subprocess.run(['sudo', 'modprobe', 'nvidia'], check=False, timeout=5)
-            subprocess.run(['sudo', 'modprobe', 'nvidia_modeset'], check=False, timeout=5)
-            subprocess.run(['sudo', 'modprobe', 'nvidia_drm'], check=False, timeout=5)
-            subprocess.run(['sudo', 'modprobe', 'nvidia_uvm'], check=False, timeout=5)
-            
-            # Reload audio driver
-            logger.info("Loading audio driver...")
-            subprocess.run(['sudo', 'modprobe', 'snd_hda_intel'], check=False, timeout=5)
+            self._load_nvidia_driver()
+            # --- END MODIFICATION ---
             
             time.sleep(2)
             

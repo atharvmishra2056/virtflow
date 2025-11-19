@@ -7,18 +7,42 @@ from PySide6.QtWidgets import (
     QFrame, QVBoxLayout, QLabel, QListWidget, QPushButton, QListWidgetItem,
     QMessageBox, QMenu
 )
-from PySide6.QtCore import Qt, QSize, Signal, QTimer, Slot
-from PySide6.QtGui import QIcon, QAction, QCursor
+# --- TASK 1.4: Import QThread ---
+from PySide6.QtCore import Qt, QSize, Signal, QTimer, Slot, QThread
+
+from PySide6.QtGui import QIcon, QAction, QCursor, QColor
 
 # Import our new custom item widget
 from ui.widgets.vm_list_item_widget import VMListItemWidget
+from ui.widgets.icon_utils import create_recolored_icon
 
 from backend.libvirt_manager import LibvirtManager
 from backend.vm_controller import VMController, VMState
+# --- TASK 1.4: Import GuestDriverHelper ---
+from backend.guest_driver_helper import GuestDriverHelper
 from models.vm_model import VMModel
 from utils.logger import logger
 import config
 import time
+
+# --- TASK 1.4: Worker thread for Guest Tools ---
+class GuestToolsWorker(QThread):
+    """Worker thread for installing guest tools"""
+    finished = Signal(bool, str) # success, message
+    
+    def __init__(self, helper: GuestDriverHelper, vm_name: str):
+        super().__init__()
+        self.helper = helper
+        self.vm_name = vm_name
+        
+    def run(self):
+        try:
+            success, message = self.helper.install_virtio_drivers(self.vm_name)
+            self.finished.emit(success, message)
+        except Exception as e:
+            logger.exception(f"Exception in GuestToolsWorker: {e}")
+            self.finished.emit(False, str(e))
+# --- END TASK 1.4 ---
 
 class SidebarWidget(QFrame):
     """Sidebar holding the VM list and New VM button"""
@@ -35,9 +59,13 @@ class SidebarWidget(QFrame):
         # --- Backend ---
         self.manager = LibvirtManager()
         self.controller = VMController(self.manager)
+        # --- TASK 1.4: Instantiate helper ---
+        self.guest_helper = GuestDriverHelper(self.manager)
         self.vm_data = {} # Cache for VMModel objects by UUID
         self.prev_stats = {}
         self.prev_time = {}
+        # --- TASK 1.4: Add worker attribute ---
+        self._guest_tools_worker = None
 
         # --- UI ---
         self.main_layout = QVBoxLayout(self)
@@ -58,8 +86,9 @@ class SidebarWidget(QFrame):
 
         self.new_vm_btn = QPushButton(" Create New VM")
         self.new_vm_btn.setObjectName("NewVMButton")
-        # Add plus icon
-        plus_icon = QIcon(str(config.ICONS_DIR / "plus-circle.svg"))
+        # The "New VM" button is a PrimaryButton, which has white text.
+        # We need a white icon to match.
+        plus_icon = create_recolored_icon(str(config.ICONS_DIR / "plus-circle.svg"), QColor("#FFFFFF"))
         self.new_vm_btn.setIcon(plus_icon)
         # self.new_vm_btn.clicked.connect(...) # We'll connect this later
 
@@ -155,10 +184,13 @@ class SidebarWidget(QFrame):
             self._on_selection_changed()
 
         except Exception as e:
-            logger.info(f"VM list refreshed: {len(domains)} VMs found")
+            # This can happen if libvirt connection is lost
+            logger.error(f"Failed to refresh VM list: {e}")
+            # Optionally, you could stop the timer here
+            # self.refresh_timer.stop()
         
         # Store all VMs for filtering
-        self.all_vms = domains
+        # self.all_vms = domains # domains is not defined here if exception
         
         # Apply current filter if any
         if self.current_filter:
@@ -379,9 +411,13 @@ class SidebarWidget(QFrame):
         
         # --- Guest Tools ---
         menu.addSeparator()
-        tools_action = QAction("Install Guest Tools (VirtIO)", self)
+        tools_action = QAction("Install/Update Guest Tools", self)
         tools_action.setEnabled(vm.state == VMState.RUNNING)
+        # --- TASK 1.4: Connect to new worker slot ---
         tools_action.triggered.connect(self._on_install_guest_tools)
+        if vm.state != VMState.RUNNING:
+            tools_action.setToolTip("VM must be running to install guest tools")
+        # --- END TASK 1.4 ---
         menu.addAction(tools_action)
         
         menu.exec(self.vm_list.mapToGlobal(pos))
@@ -392,6 +428,7 @@ class SidebarWidget(QFrame):
         self.manager.set_display_preference(domain, preference)
         logger.info(f"Set display preference for {domain.name()} to {preference}")
 
+    # --- TASK 1.4: Updated Slot ---
     @Slot()
     def _on_install_guest_tools(self):
         """Slot to trigger guest tools installation."""
@@ -399,9 +436,25 @@ class SidebarWidget(QFrame):
         if not domain:
             return
             
+        if self._guest_tools_worker and self._guest_tools_worker.isRunning():
+            QMessageBox.warning(self, "In Progress", "Guest tools installation is already running.")
+            return
+
         logger.info(f"Attempting to install guest tools for {domain.name()}...")
-        # We need to add this method to the controller
-        # self.controller.install_guest_tools(domain.UUIDString()) 
+        
+        self._guest_tools_worker = GuestToolsWorker(self.guest_helper, domain.name())
+        self._guest_tools_worker.finished.connect(self._on_guest_tools_finished)
+        self._guest_tools_worker.start()
+        
         QMessageBox.information(self, "Guest Tools",
-            "Guest tools installation logic will be added in Phase 2.\n"
-            "This will find the virtio ISO and run the installer.")
+            f"Attempting to install VirtIO guest tools in {domain.name()}...\n\n"
+            "This may take a few moments. You will be notified when it's complete.")
+
+    @Slot(bool, str)
+    def _on_guest_tools_finished(self, success: bool, message: str):
+        """Slot to handle completion of the guest tools worker thread."""
+        if success:
+            QMessageBox.information(self, "Guest Tools Installation", message)
+        else:
+            QMessageBox.critical(self, "Guest Tools Installation Failed", message)
+    # --- END TASK 1.4 ---

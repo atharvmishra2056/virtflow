@@ -194,6 +194,19 @@ class LibvirtManager:
             logger.warning(f"Storage pool '{pool_name}' not found")
             return None
     
+    def _get_virtflow_metadata_node(self, root: ET.Element) -> ET.Element:
+        """Finds or creates the <metadata> and <virtflow:virtflow> nodes."""
+        metadata_node = root.find("metadata")
+        if metadata_node is None:
+            metadata_node = ET.SubElement(root, "metadata")
+        
+        # Note: ET.find() requires the namespace URI in curly braces
+        virtflow_node = metadata_node.find(f"{{{VIRTFLOW_XML_NS}}}virtflow")
+        if virtflow_node is None:
+            virtflow_node = ET.SubElement(metadata_node, f"{{{VIRTFLOW_XML_NS}}}virtflow")
+        
+        return virtflow_node
+
     # --- NEW: Get Display Preference ---
     def get_display_preference(self, domain: libvirt.virDomain) -> str:
         """
@@ -203,12 +216,12 @@ class LibvirtManager:
         try:
             xml_desc = domain.XMLDesc(0)
             root = ET.fromstring(xml_desc)
-            # Find our custom metadata tag
-            # Note: ET.find() requires the namespace URI in curly braces
-            display_node = root.find(f".//{{{VIRTFLOW_XML_NS}}}display")
+            virtflow_node = root.find(f".//{{{VIRTFLOW_XML_NS}}}virtflow")
             
-            if display_node is not None and display_node.get('type'):
-                return display_node.get('type')
+            if virtflow_node is not None:
+                display_node = virtflow_node.find(f"{{{VIRTFLOW_XML_NS}}}display")
+                if display_node is not None and display_node.get('type'):
+                    return display_node.get('type')
         except Exception as e:
             logger.error(f"Could not read display preference: {e}")
         
@@ -228,16 +241,8 @@ class LibvirtManager:
             xml_desc = domain.XMLDesc(0)
             root = ET.fromstring(xml_desc)
             
-            metadata_node = root.find("metadata")
-            if metadata_node is None:
-                metadata_node = ET.SubElement(root, "metadata")
+            virtflow_node = self._get_virtflow_metadata_node(root)
             
-            # Find or create our virtflow node
-            virtflow_node = metadata_node.find(f"{{{VIRTFLOW_XML_NS}}}virtflow")
-            if virtflow_node is None:
-                virtflow_node = ET.SubElement(metadata_node, f"{{{VIRTFLOW_XML_NS}}}virtflow")
-            
-            # Find or create the display node
             display_node = virtflow_node.find(f"{{{VIRTFLOW_XML_NS}}}display")
             if display_node is None:
                 display_node = ET.SubElement(virtflow_node, f"{{{VIRTFLOW_XML_NS}}}display")
@@ -251,7 +256,111 @@ class LibvirtManager:
             
         except Exception as e:
             logger.error(f"Failed to set display preference: {e}")
-    
+
+    # --- TASKS 2.2 & 2.3: New generic settings methods ---
+    def set_vm_setting(self, domain: libvirt.virDomain, key: str, value: str):
+        """Saves a generic key-value setting to the VM's metadata."""
+        try:
+            xml_desc = domain.XMLDesc(0)
+            root = ET.fromstring(xml_desc)
+            
+            virtflow_node = self._get_virtflow_metadata_node(root)
+            
+            setting_node = virtflow_node.find(f"{{{VIRTFLOW_XML_NS}}}setting[@key='{key}']")
+            if setting_node is None:
+                setting_node = ET.SubElement(virtflow_node, f"{{{VIRTFLOW_XML_NS}}}setting")
+                setting_node.set("key", key)
+                
+            setting_node.set("value", value)
+            
+            new_xml = ET.tostring(root, encoding="unicode")
+            self.connection.defineXML(new_xml)
+            logger.debug(f"Set VM setting for {domain.name()}: {key} = {value}")
+            
+        except Exception as e:
+            logger.error(f"Failed to set VM setting '{key}': {e}")
+
+    def update_core_hardware(self, domain: libvirt.virDomain, vcpus: int, memory_mb: int) -> bool:
+        """Applies core hardware changes (RAM, CPU) to a defined (non-running) VM."""
+        if domain.isActive():
+            logger.error("Cannot change core hardware while VM is running.")
+            return False
+        
+        try:
+            xml_desc = domain.XMLDesc(0)
+            root = ET.fromstring(xml_desc)
+            
+            # Update VCPUs
+            vcpu_node = root.find("vcpu")
+            if vcpu_node is not None:
+                vcpu_node.text = str(vcpus)
+            
+            # Update Memory (libvirt uses KiB)
+            memory_node = root.find("memory")
+            if memory_node is not None:
+                memory_node.text = str(memory_mb * 1024)
+                memory_node.set("unit", "KiB")
+            
+            # Update Current Memory (optional, but good practice)
+            current_memory_node = root.find("currentMemory")
+            if current_memory_node is not None:
+                current_memory_node.text = str(memory_mb * 1024)
+                current_memory_node.set("unit", "KiB")
+                
+            # Re-define the VM
+            new_xml = ET.tostring(root, encoding="unicode")
+            self.connection.defineXML(new_xml)
+            logger.info(f"Updated core hardware for {domain.name()}: {vcpus} VCPUs, {memory_mb} MB RAM")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update core hardware: {e}")
+            return False
+
+    def get_all_vm_settings(self, domain: libvirt.virDomain) -> Dict[str, str]:
+        """Retrieves all saved settings from the VM's metadata AND live config."""
+        settings = {}
+        try:
+            xml_desc = domain.XMLDesc(0)
+            root = ET.fromstring(xml_desc)
+            
+            # 1. Read live hardware values
+            settings["vcpus"] = root.find("vcpu").text or "1"
+            settings["memory_mb"] = str(int(root.find("memory").text or "1024") // 1024)
+            
+            # VRAM (from QXL or VirtIO)
+            qxl_vram = root.find(".//video/model[@type='qxl']")
+            virtio_vram = root.find(".//video/model[@type='virtio']")
+            if qxl_vram is not None and qxl_vram.get("vram"):
+                # qxl vram is in KiB
+                settings["vram"] = str(int(qxl_vram.get("vram")) // 1024)
+            elif virtio_vram is not None and virtio_vram.get("vram"):
+                # virtio vram is in KiB
+                settings["vram"] = str(int(virtio_vram.get("vram")) // 1024)
+            else:
+                settings["vram"] = "64" # Default if not found
+            
+            # 3D Accel
+            accel = root.find(".//video/model/acceleration")
+            settings["3d_accel"] = "true" if (accel is not None and accel.get("accel3d") == "yes") else "false"
+            
+            # TPM
+            settings["tpm_enabled"] = "true" if root.find(".//tpm") is not None else "false"
+
+            # 2. Read saved metadata settings
+            virtflow_node = root.find(f".//{{{VIRTFLOW_XML_NS}}}virtflow")
+            if virtflow_node is not None:
+                for setting in virtflow_node.findall(f"{{{VIRTFLOW_XML_NS}}}setting"):
+                    key = setting.get("key")
+                    value = setting.get("value")
+                    if key and key not in settings: # Metadata overrides only if not live
+                        settings[key] = value
+                        
+        except Exception as e:
+            logger.error(f"Could not read VM settings: {e}")
+        
+        return settings
+    # --- END TASKS 2.2 & 2.3 ---
+
     def __del__(self):
         """Cleanup on deletion"""
         self.disconnect()

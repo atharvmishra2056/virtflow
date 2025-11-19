@@ -3,10 +3,11 @@ TitleBarWidget (Nebula UI)
 With animated buttons and move/resize logic.
 """
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel, QFrame, QPushButton, QLineEdit, QMenu
+    QWidget, QHBoxLayout, QLabel, QFrame, QPushButton, QLineEdit, QMenu, QCheckBox
 )
-from PySide6.QtCore import Qt, QSize, Signal
-from PySide6.QtGui import QIcon, QAction
+from PySide6.QtCore import Qt, QSize, Signal, QPoint, Slot
+from PySide6.QtGui import QIcon, QAction, QColor, QPixmap
+from ui.widgets.icon_utils import create_recolored_icon
 import config
 
 # --- NEW: Custom animated title bar button ---
@@ -92,21 +93,20 @@ class TitleBarWidget(QFrame):
         logo_layout.setContentsMargins(0, 0, 0, 0)
         logo_layout.setSpacing(8)
         
-        # Cube icon (using emoji for now, can be replaced with SVG)
-        cube_icon = QLabel("🧊")
-        cube_icon.setStyleSheet("""
-            QLabel {
-                color: #6366f1;
-                font-size: 20px;
-            }
-        """)
-        
-        logo = QLabel("NEBULA")
+        # --- Point 2: Use kxw.svg (recolored to white) ---
+        wolf_icon = QLabel()
+        wolf_pixmap = QPixmap(str(config.ICONS_DIR / "kxw.svg"))
+        wolf_icon.setPixmap(wolf_pixmap.scaled(
+            QSize(28, 28), Qt.KeepAspectRatio, Qt.SmoothTransformation
+        ))
+
+        # --- Point 1: Change name to "The Wolf VM" ---
+        logo = QLabel("The Easy")
         logo.setObjectName("TitleBarLogo")
         subtitle = QLabel("VM")
         subtitle.setObjectName("TitleBarSubtitle")
-        
-        logo_layout.addWidget(cube_icon)
+
+        logo_layout.addWidget(wolf_icon)
         logo_layout.addWidget(logo)
         logo_layout.addWidget(subtitle)
         
@@ -143,30 +143,35 @@ class TitleBarWidget(QFrame):
         layout.addStretch()
 
         # 4. User/Settings Icons - Move snapshot and settings here like GG.html
-        self.notifications_btn = QPushButton("🔔")  # Bell icon
-        self.notifications_btn.setObjectName("GlassButton")
-        self.notifications_btn.setFixedSize(36, 36)
+        # self.notifications_btn = QPushButton("🔔")  # Bell icon
+        # self.notifications_btn.setProperty("class", "GlassButton")
+        # self.notifications_btn.setFixedSize(36, 36)
 
         # 4. User/Settings Icons with Setup Menu
         self.settings_btn = QPushButton()
-        self.settings_btn.setObjectName("GlassButton")
+        self.settings_btn.setProperty("class", "GlassButton")
         self.settings_btn.setFixedSize(36, 36)
-        self.settings_btn.setIcon(QIcon(str(config.ICONS_DIR / "gear.svg"))) # Assumes gear.svg
+        self.settings_btn.setIcon(create_recolored_icon(str(config.ICONS_DIR / "gear.svg"), QColor("#e2e8f0")))
 
         # Create the setup menu
         self.setup_menu = QMenu(self)
-        self.settings_btn.setMenu(self.setup_menu)
+        # self.settings_btn.setMenu(self.setup_menu) # <-- REMOVED to hide arrow
+        self.settings_btn.clicked.connect(self._show_setup_menu) # <-- ADDED
 
+        # --- TASK 1.1 MODIFICATION ---
         # Add actions
         self.setup_sudo_action = QAction("1. Configure Sudo Permissions...", self)
-        self.setup_hooks_action = QAction("2. Install Libvirt Hooks...", self)
-        self.setup_lg_action = QAction("3. Install Looking Glass Client...", self)
+        self.setup_lg_action = QAction("2. Install Looking Glass Client...", self)
 
         self.setup_menu.addAction(self.setup_sudo_action)
-        self.setup_menu.addAction(self.setup_hooks_action)
         self.setup_menu.addAction(self.setup_lg_action)
         self.setup_menu.addSeparator()
-        self.setup_menu.addAction(QAction("Application Settings...", self))
+        
+        # --- TASK 2.1 MODIFICATION ---
+        self.app_settings_action = QAction("VM Settings...", self)
+        self.app_settings_action.setEnabled(False) # Will be enabled by main_window
+        self.setup_menu.addAction(self.app_settings_action)
+        # --- END MODIFICATION ---
 
         user_avatar = QLabel()
         user_avatar.setFixedSize(32, 32)
@@ -179,7 +184,6 @@ class TitleBarWidget(QFrame):
             }
         """)
         
-        layout.addWidget(self.notifications_btn)
         layout.addWidget(self.settings_btn)
         layout.addWidget(user_avatar)
         
@@ -243,3 +247,9 @@ class TitleBarWidget(QFrame):
     def _on_search_changed(self, text):
         """Handle search text changes"""
         self.search_changed.emit(text.lower().strip())
+
+    @Slot()
+    def _show_setup_menu(self):
+        """Manually shows the setup menu without attaching it to the button."""
+        menu_pos = self.settings_btn.mapToGlobal(QPoint(0, self.settings_btn.height()))
+        self.setup_menu.exec(menu_pos)

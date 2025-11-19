@@ -34,6 +34,28 @@ class GuestDriverHelper:
         """
         self.manager = manager
     
+    def _run_qemu_agent_command(self, vm_name: str, command: dict, timeout: int = 10) -> Tuple[bool, dict]:
+        """Helper to run a QEMU Guest Agent command via virsh"""
+        try:
+            cmd_json = json.dumps(command)
+            result = subprocess.run(
+                ['virsh', 'qemu-agent-command', vm_name, cmd_json],
+                capture_output=True,
+                text=True,
+                timeout=timeout
+            )
+            
+            if result.returncode != 0:
+                logger.warning(f"qemu-agent-command failed for {vm_name}: {result.stderr}")
+                return False, {"error": result.stderr.strip()}
+            
+            response = json.loads(result.stdout)
+            return True, response
+            
+        except Exception as e:
+            logger.error(f"Exception in qemu-agent-command: {e}")
+            return False, {"error": str(e)}
+
     def check_guest_agent_ready(self, vm_name: str, timeout: int = 60) -> bool:
         """
         Check if QEMU Guest Agent is ready in the VM
@@ -50,20 +72,13 @@ class GuestDriverHelper:
         start_time = time.time()
         while time.time() - start_time < timeout:
             try:
-                result = subprocess.run(
-                    ['virsh', 'qemu-agent-command', vm_name,
-                     '{"execute":"guest-ping"}'],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
+                # Use guest-ping for a lightweight check
+                success, response = self._run_qemu_agent_command(vm_name, {"execute": "guest-ping"})
                 
-                if result.returncode == 0:
+                if success and "return" in response:
                     logger.info(f"Guest agent ready in '{vm_name}'")
                     return True
                     
-            except subprocess.TimeoutExpired:
-                pass
             except Exception as e:
                 logger.debug(f"Guest agent check failed: {e}")
             
@@ -72,6 +87,87 @@ class GuestDriverHelper:
         logger.warning(f"Guest agent not ready after {timeout}s")
         return False
     
+    # --- TASK 1.4: New Method ---
+    def install_virtio_drivers(self, vm_name: str) -> Tuple[bool, str]:
+        """
+        Attempts to find the virtio-win.iso and run the installer.
+        """
+        if not self.check_guest_agent_ready(vm_name):
+            return False, "QEMU Guest Agent is not running. Please start the VM and ensure the agent is installed and running."
+            
+        # 1. Find the VirtIO CD-ROM drive letter
+        logger.info(f"Searching for VirtIO ISO in '{vm_name}'...")
+        success, response = self._run_qemu_agent_command(vm_name, {"execute": "guest-get-fsinfo"})
+        
+        if not success or "return" not in response:
+            return False, f"Failed to query guest filesystems: {response.get('error')}"
+        
+        drive_letter = None
+        for drive in response.get("return", []):
+            if drive.get("type") == "cdrom" and "VIRTIO" in drive.get("fs-label", "").upper():
+                drive_letter = drive.get("mountpoint")
+                break
+        
+        if not drive_letter:
+            return False, "Could not find an attached CD-ROM with the label 'VIRTIO'. Please attach the 'virtio-win.iso' to the VM."
+        
+        logger.info(f"Found VirtIO ISO at drive: {drive_letter}")
+        
+        # 2. Construct installer path and run command
+        # We target the 64-bit guest tools installer
+        installer_path = f"{drive_letter}\\virtio-win-gt-x64.msi"
+        
+        logger.info(f"Executing installer in guest: {installer_path}")
+        
+        # Use guest-exec to run msiexec silently
+        exec_cmd = {
+            "execute": "guest-exec",
+            "arguments": {
+                "path": "C:\\Windows\\System32\\msiexec.exe",
+                "arg": [
+                    "/i",
+                    installer_path,
+                    "/qn", # Quiet mode, no UI
+                    "/norestart" # Do not automatically restart
+                ],
+                "capture-output": True
+            }
+        }
+
+        success, response = self._run_qemu_agent_command(vm_name, exec_cmd, timeout=30)
+        
+        if not success:
+            return False, f"Failed to execute guest command: {response.get('error')}"
+
+        if "return" not in response or "pid" not in response["return"]:
+             # This can happen if the command failed immediately
+             return False, f"Guest command failed. Is the path correct? {installer_path}"
+
+        pid = response.get("return", {}).get("pid")
+        logger.info(f"Guest tools installer started (PID: {pid}). Monitoring...")
+        
+        # 3. Wait for the installer to finish (short poll)
+        # msiexec might return immediately, so we poll for its status.
+        start_time = time.time()
+        while time.time() - start_time < 120: # 2 minute timeout
+            status_cmd = {"execute": "guest-exec-status", "arguments": {"pid": pid}}
+            status_success, status_response = self._run_qemu_agent_command(vm_name, status_cmd)
+            
+            if status_success and status_response.get("return", {}).get("exited", False):
+                exit_code = status_response["return"].get("exitcode", -1)
+                if exit_code == 0:
+                    logger.info("Guest tools installer finished successfully.")
+                    return True, "VirtIO guest tools installed successfully."
+                else:
+                    logger.error(f"Guest tools installer failed with exit code: {exit_code}")
+                    return False, f"Installer failed with exit code: {exit_code}. Check guest logs."
+            
+            time.sleep(2)
+            
+        return False, "Installer process timed out. It may be running in the background, or it may have failed."
+
+    # --- End Task 1.4 ---
+
     def get_guest_os_info(self, vm_name: str) -> Optional[Dict]:
         """
         Get guest OS information via guest agent
@@ -82,24 +178,11 @@ class GuestDriverHelper:
         Returns:
             Dictionary with OS info or None
         """
-        try:
-            result = subprocess.run(
-                ['virsh', 'qemu-agent-command', vm_name,
-                 '{"execute":"guest-get-osinfo"}', '--pretty'],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            
-            if result.returncode == 0:
-                data = json.loads(result.stdout)
-                os_info = data.get('return', {})
-                logger.info(f"Guest OS: {os_info.get('name')} {os_info.get('version')}")
-                return os_info
-                
-        except Exception as e:
-            logger.error(f"Failed to get guest OS info: {e}")
-        
+        success, response = self._run_qemu_agent_command(vm_name, {"execute":"guest-get-osinfo"})
+        if success and "return" in response:
+            os_info = response.get('return', {})
+            logger.info(f"Guest OS: {os_info.get('name')} {os_info.get('version')}")
+            return os_info
         return None
     
     def execute_guest_command(
@@ -134,26 +217,13 @@ class GuestDriverHelper:
                 }
             }
             
-            # Execute command
-            result = subprocess.run(
-                ['virsh', 'qemu-agent-command', vm_name,
-                 json.dumps(exec_cmd)],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            
-            if result.returncode != 0:
-                logger.error(f"Failed to execute guest command: {result.stderr}")
-                return False, None
-            
-            # Parse PID
-            exec_result = json.loads(result.stdout)
-            pid = exec_result.get('return', {}).get('pid')
-            
+            success, response = self._run_qemu_agent_command(vm_name, exec_cmd, timeout=30)
+            if not success:
+                return False, response.get("error")
+
+            pid = response.get('return', {}).get('pid')
             if not pid:
-                logger.error("No PID returned from guest-exec")
-                return False, None
+                return False, "No PID returned from guest-exec"
             
             logger.debug(f"Guest command started with PID {pid}")
             
@@ -165,17 +235,10 @@ class GuestDriverHelper:
                     "arguments": {"pid": pid}
                 }
                 
-                status_result = subprocess.run(
-                    ['virsh', 'qemu-agent-command', vm_name,
-                     json.dumps(status_cmd)],
-                    capture_output=True,
-                    text=True,
-                    timeout=10
-                )
+                status_success, status_response = self._run_qemu_agent_command(vm_name, status_cmd)
                 
-                if status_result.returncode == 0:
-                    status_data = json.loads(status_result.stdout)
-                    status_info = status_data.get('return', {})
+                if status_success and "return" in status_response:
+                    status_info = status_response.get('return', {})
                     
                     if status_info.get('exited'):
                         exit_code = status_info.get('exitcode', -1)
@@ -195,11 +258,11 @@ class GuestDriverHelper:
                 time.sleep(2)
             
             logger.warning(f"Guest command timed out after {timeout}s")
-            return False, None
+            return False, "Command timed out"
             
         except Exception as e:
             logger.error(f"Failed to execute guest command: {e}")
-            return False, None
+            return False, str(e)
     
     def check_virtio_drivers_installed(self, vm_name: str) -> bool:
         """
@@ -364,13 +427,13 @@ class GuestDriverHelper:
                 }
             }
             
-            # Note: guest-file-write might not be available in all guest agents
-            # Alternative: Use PowerShell to download from a temp web server
-            # For simplicity, we'll use a shared folder approach in production
-            
-            logger.warning("File copy via guest agent requires additional setup")
-            logger.info("Alternative: Use shared folder or SMB mount")
-            return False
+            success, response = self._run_qemu_agent_command(vm_name, write_cmd, timeout=120)
+            if success:
+                logger.info("File copied successfully")
+                return True
+            else:
+                logger.error(f"Failed to copy file to guest: {response.get('error')}")
+                return False
             
         except Exception as e:
             logger.error(f"Failed to copy file to guest: {e}")
@@ -399,7 +462,6 @@ class GuestDriverHelper:
             logger.info("Installing NVIDIA driver (silent mode)...")
             
             # NVIDIA silent install command
-            # Extract driver first, then run setup.exe
             success, output = self.execute_guest_command(
                 vm_name,
                 driver_path_in_guest,
@@ -450,6 +512,7 @@ class GuestDriverHelper:
         logger.info(f"Requesting reboot of '{vm_name}'...")
         
         try:
+            # Use the guest-agent reboot mode
             result = subprocess.run(
                 ['virsh', 'reboot', vm_name, '--mode', 'agent'],
                 capture_output=True,

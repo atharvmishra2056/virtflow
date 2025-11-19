@@ -6,9 +6,9 @@ Now with resizers and signal/slot connections.
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QSizeGrip, QStatusBar, QVBoxLayout, QFrame,
-    QMessageBox
+    QMessageBox, QGraphicsBlurEffect
 )
-from PySide6.QtCore import Qt, QSize, QProcess, Slot
+from PySide6.QtCore import Qt, QSize, QProcess, Slot, QPropertyAnimation, QEasingCurve
 from PySide6.QtGui import QIcon, QGuiApplication
 
 import config
@@ -22,6 +22,8 @@ from ui.title_bar import TitleBarWidget
 from ui.sidebar_widget import SidebarWidget
 from ui.main_stage_widget import MainStageWidget
 from ui.animated_background import AnimatedBackground
+# --- TASK 2.1: Import Settings Dialog ---
+from ui.settings_dialog import SettingsDialog
 # ---------------------------
 
 class MainWindow(QMainWindow):
@@ -64,6 +66,13 @@ class MainWindow(QMainWindow):
         self.main_layout.setContentsMargins(0, 0, 0, 0)
         self.main_layout.setSpacing(0)
         
+        # --- PHASE 2 (REDUX) FIX: Add blur effect ---
+        self.blur_effect = QGraphicsBlurEffect(self)
+        self.blur_effect.setBlurRadius(0)
+        self.blur_effect.setEnabled(False) # Disabled by default
+        self.glass_panel.setGraphicsEffect(self.blur_effect)
+        # --- END FIX ---
+
         # --- END SIMPLIFIED STRUCTURE ---
         
         self.setMinimumSize(1200, 800)
@@ -71,6 +80,9 @@ class MainWindow(QMainWindow):
         # Store window geometry for dragging
         self.drag_start_position = None
         self.window_start_position = None
+
+        # --- TASK 2.1: Store current VM ---
+        self.current_vm: VMModel | None = None
 
         # Initialize UI
         self._setup_ui()
@@ -106,7 +118,7 @@ class MainWindow(QMainWindow):
 
         # --- Connect Signals ---
         # When a VM is selected in the sidebar, tell the main stage to update
-        self.sidebar.vm_selected.connect(self.main_stage.update_vm_info)
+        self.sidebar.vm_selected.connect(self._on_vm_selected)
         
         # Connect main stage buttons to sidebar logic
         self.main_stage.start_stop_btn.clicked.connect(self.sidebar.on_start_stop_vm)
@@ -119,11 +131,15 @@ class MainWindow(QMainWindow):
         # Connect search signal from title bar to sidebar filtering
         self.title_bar.search_changed.connect(self.sidebar.filter_vms)
         
+        # --- TASK 1.1 MODIFICATION ---
         # --- NEW: Connect Setup Menu Actions ---
         self.title_bar.setup_sudo_action.triggered.connect(self._on_setup_sudo)
-        self.title_bar.setup_hooks_action.triggered.connect(self._on_setup_hooks)
+        # self.title_bar.setup_hooks_action.triggered.connect(self._on_setup_hooks) # <-- DEPRECATED/REMOVED
         self.title_bar.setup_lg_action.triggered.connect(self._on_install_looking_glass)
-        # --- END NEW ---
+
+        # --- TASK 2.1: Connect Settings Dialog ---
+        self.title_bar.app_settings_action.triggered.connect(self._on_show_settings)
+        # --- END MODIFICATION ---
         
     def _add_resizers(self):
         """Add resize grips to corners for window resizing"""
@@ -208,6 +224,32 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'animated_bg'):
             self.animated_bg.setGeometry(0, 0, self.width(), self.height())
 
+    # --- TASK 2.1: New slot to track VM ---
+    @Slot(object, dict)
+    def _on_vm_selected(self, vm: VMModel | None, stats: dict):
+        """Slot to receive the selected VM and pass it to the main stage."""
+        self.current_vm = vm
+        # Pass the signal on to the main stage
+        self.main_stage.update_vm_info(vm, stats)
+        
+        # Enable/disable the settings action
+        self.title_bar.app_settings_action.setEnabled(vm is not None)
+
+    # --- TASK 2.1: New slot to show settings ---
+    @Slot()
+    def _on_show_settings(self):
+        """Launches the HyperGlass Settings Dialog."""
+        if self.current_vm is None:
+            QMessageBox.warning(self, "No VM Selected", "Please select a VM to configure its settings.")
+            return
+            
+        # Pass the VM and the sidebar's libvirt manager to the dialog
+        dialog = SettingsDialog(self.current_vm, self.sidebar.manager, self)
+        dialog.exec()
+        
+        # After closing, refresh sidebar in case settings changed
+        self.sidebar.refresh_vm_list()
+
     def _on_create_vm(self):
         """Handle Create VM button click"""
         from ui.create_vm_wizard import CreateVMWizard
@@ -256,6 +298,8 @@ class MainWindow(QMainWindow):
     # --- NEW: Libvirt hook setup dialog ---
     @Slot()
     def _on_setup_hooks(self):
+        # This function is no longer connected, but we leave it here
+        # in case it's needed for a future (different) hook system.
         hook_file_path = "/etc/libvirt/hooks/qemu"
         
         if os.path.exists(hook_file_path):
@@ -399,3 +443,26 @@ exit 0
                 f"Failed to launch the installer: {e}\n\n"
                 "Please run `install_looking_glass.sh` manually."
             )
+
+    # --- PHASE 2 (REDUX) FIX: Methods to control blur ---
+    def enable_blur(self):
+        """Animates the blur effect on."""
+        self.blur_effect.setEnabled(True)
+        self.blur_animation = QPropertyAnimation(self.blur_effect, b"blurRadius")
+        self.blur_animation.setDuration(150) # ms
+        self.blur_animation.setStartValue(0)
+        self.blur_animation.setEndValue(20)
+        self.blur_animation.setEasingCurve(QEasingCurve.InOutQuad)
+        self.blur_animation.start()
+
+    def disable_blur(self):
+        """Animates the blur effect off."""
+        self.blur_animation = QPropertyAnimation(self.blur_effect, b"blurRadius")
+        self.blur_animation.setDuration(150) # ms
+        self.blur_animation.setStartValue(20)
+        self.blur_animation.setEndValue(0)
+        self.blur_animation.setEasingCurve(QEasingCurve.InOutQuad)
+        # Disable the effect *after* the animation finishes to save resources
+        self.blur_animation.finished.connect(lambda: self.blur_effect.setEnabled(False))
+        self.blur_animation.start()
+    # --- END FIX ---

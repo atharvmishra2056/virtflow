@@ -1,105 +1,142 @@
 """
-Dependency Checker - Verifies all required system packages are installed
+Checks for all required system dependencies for The Wolf VM.
 """
-
-import subprocess
 import shutil
-from pathlib import Path
-from typing import Dict, List, Tuple
+import subprocess
 from utils.logger import logger
 
+# --- Required Binaries ---
+REQUIRED_BINARIES = [
+    'qemu-system-x86_64',   # Core Hypervisor
+    'virsh',                # Libvirt Management
+    'virt-viewer',          # SPICE Display
+    'looking-glass-client', # High-Performance Display
+    'xdotool',              # Window Management (for LG resizing)
+    'wmctrl'                # Window Management (for LG positioning)
+]
+
+REQUIRED_PACKAGES = {
+    'debian': [
+        'qemu-system-x86', 
+        'qemu-kvm', 
+        'libvirt-daemon-system', 
+        'libvirt-clients', 
+        'bridge-utils', 
+        'virt-manager',
+        'ovmf',
+        'looking-glass-client', 
+        'xdotool',              
+        'wmctrl'                
+    ],
+    'redhat': [
+        'qemu-kvm', 
+        'libvirt-daemon', 
+        'libvirt-client', 
+        'bridge-utils', 
+        'virt-install',
+        'ovmf',
+        'looking-glass-client', 
+        'xdotool',              
+        'wmctrl'                
+    ],
+}
+
+REQUIRED_GROUPS = ['libvirt', 'kvm']
 
 class DependencyChecker:
-    """Check system dependencies"""
+    """Checks for system dependencies"""
     
-    REQUIRED_PACKAGES = {
-        'qemu-img': 'qemu-utils',
-        'virsh': 'libvirt-clients',
-        'qemu-system-x86_64': 'qemu-system-x86',
-        'lspci': 'pciutils',
-        'lsmod': 'kmod',
-        'virt-viewer': 'virt-viewer'
-    }
-    
-    def check_all_dependencies(self) -> Tuple[bool, List[str]]:
-        """
-        Check all required dependencies
-        
-        Returns:
-            Tuple of (all_ok, missing_packages)
-        """
-        missing = []
-        
-        for binary, package in self.REQUIRED_PACKAGES.items():
-            if not self.check_binary(binary):
-                missing.append(package)
-                logger.warning(f"Missing: {binary} (install {package})")
-        
-        if not self.check_ovmf_installed():
-            missing.append('ovmf')
-            logger.warning("Missing OVMF firmware files (install ovmf)")
+    def __init__(self):
+        self.distro = self._detect_distro()
 
-        all_ok = len(missing) == 0
-        return all_ok, missing
-    
-    def check_binary(self, name: str) -> bool:
-        """Check if a binary is available in PATH"""
-        return shutil.which(name) is not None
-    
-    def get_install_command(self, packages: List[str]) -> str:
-        """Get installation command for missing packages"""
-        return f"sudo apt install -y {' '.join(packages)}"
-    
-    def check_libvirt_connection(self) -> bool:
-        """Check if we can connect to libvirt"""
+    def _detect_distro(self) -> str:
+        """Detect Linux distribution"""
         try:
-            result = subprocess.run(
-                ['virsh', 'version'],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
-    
-    def check_user_groups(self) -> Tuple[bool, List[str]]:
-        """Check if user is in required groups"""
-        import os
-        import grp
+            with open('/etc/os-release') as f:
+                for line in f:
+                    if line.startswith('ID_LIKE='):
+                        if 'debian' in line:
+                            return 'debian'
+                        if 'fedora' in line or 'rhel' in line:
+                            return 'redhat'
+                    if line.startswith('ID='):
+                        if 'debian' in line or 'ubuntu' in line:
+                            return 'debian'
+                        if 'fedora' in line or 'rhel' in line or 'centos' in line:
+                            return 'redhat'
+        except FileNotFoundError:
+            logger.warning("Could not detect distro, assuming debian-like")
+            return 'debian'
+        return 'debian'
+
+    def check_all_dependencies(self) -> (bool, list):
+        """Check for all required binaries"""
+        missing = []
+        for binary in REQUIRED_BINARIES:
+            if not shutil.which(binary):
+                logger.warning(f"Missing dependency: {binary}")
+                missing.append(binary)
         
-        required_groups = ['libvirt', 'kvm']
-        user = os.getenv('USER')
-        missing_groups = []
+        if missing:
+            return False, missing
         
-        try:
-            user_groups = [g.gr_name for g in grp.getgrall() if user in g.gr_mem]
+        logger.info("All binary dependencies are satisfied")
+        return True, []
+
+    def get_install_command(self, missing_binaries: list) -> str:
+        """Get install command for missing packages"""
+        if not self.distro:
+            return "Could not detect distro. Please install manually."
+        
+        packages = REQUIRED_PACKAGES.get(self.distro, [])
+        if not packages:
+            return "Distro not supported for automatic package suggestions."
             
-            for group in required_groups:
-                if group not in user_groups:
-                    missing_groups.append(group)
+        if self.distro == 'debian':
+            return f"sudo apt install -y {' '.join(packages)}"
+        elif self.distro == 'redhat':
+            return f"sudo dnf install -y {' '.join(packages)}"
+        
+        return "Please install missing packages manually."
+
+    def check_user_groups(self) -> (bool, list):
+        """Check if user is in required groups"""
+        missing_groups = []
+        try:
+            result = subprocess.run(['id', '-Gn'], capture_output=True, text=True, check=True)
+            current_groups = result.stdout.strip().split()
+            
+            for group in REQUIRED_GROUPS:
+                if group not in current_groups:
                     logger.warning(f"User not in group: {group}")
+                    missing_groups.append(group)
+            
+            if missing_groups:
+                return False, missing_groups
+            
+            logger.info("User is in all required groups")
+            return True, []
+            
         except Exception as e:
             logger.error(f"Failed to check user groups: {e}")
-        
-        return len(missing_groups) == 0, missing_groups
+            return False, REQUIRED_GROUPS
 
-    def check_ovmf_installed(self) -> bool:
-        """Check if OVMF firmware is installed"""
-        templates = [
-            "/usr/share/OVMF/OVMF_CODE_4M.ms.fd",
-            "/usr/share/OVMF/OVMF_CODE_4M.fd",
-            "/usr/share/OVMF/OVMF_CODE.fd",
-            "/usr/share/OVMF/OVMF_VARS_4M.ms.fd",
-            "/usr/share/OVMF/OVMF_VARS_4M.fd",
-            "/usr/share/OVMF/OVMF_VARS.fd",
-        ]
-        for f in templates:
-            if Path(f).exists():
+    def check_libvirt_connection(self) -> bool:
+        """Check if libvirt daemon is running and accessible"""
+        try:
+            result = subprocess.run(
+                ['virsh', 'uri'], 
+                capture_output=True, 
+                text=True, 
+                check=True,
+                timeout=5
+            )
+            if 'qemu:///system' in result.stdout:
+                logger.info("libvirt daemon is accessible")
                 return True
-        return False
-
-    def check_viewer_available(self) -> bool:
-        """Check if SPICE/VNC viewer is available"""
-        import shutil
-        return shutil.which('virt-viewer') is not None or shutil.which('remote-viewer') is not None
+            else:
+                logger.warning("libvirt daemon not accessible")
+                return False
+        except Exception as e:
+            logger.error(f"Failed to connect to libvirt: {e}")
+            return False
